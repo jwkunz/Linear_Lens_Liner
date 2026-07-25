@@ -290,7 +290,9 @@ class Component {
     if (!isFinite(this.thickness) || this.thickness < 0) this.thickness = 0;
   }
   aperturePasses(rayX) {
-    return Math.abs(rayX) <= this.height / 2;
+    // rayX is an absolute world height; the component's clear aperture is centered
+    // on its own x position, not necessarily on the global optical axis.
+    return Math.abs(rayX - this.x) <= this.height / 2;
   }
   toJSON() {
     return { id: this.id, type: this.type, name: this.name, class: this.class,
@@ -322,7 +324,7 @@ class Source extends Component {
     const rays = [];
     for (let i = 0; i < n; i++) {
       const t = n === 1 ? 0.5 : i / (n - 1);   // 0 = bottom-most ray, 1 = top-most ray
-      const x = -this.beamWidth / 2 + t * this.beamWidth;
+      const x = this.x + (-this.beamWidth / 2 + t * this.beamWidth);
       const angleDeg = (this.pointing - this.divergence / 2) + t * this.divergence;
       const kind = (i === n - 1) ? "top" : (i === 0) ? "bottom" : "mid";
       const label = n <= 3 ? (kind === "mid" ? "middle" : kind) : `ray ${i + 1}/${n}`;
@@ -418,15 +420,16 @@ class SimulationEngine {
 
           if (comp.type === "lens") {
             const m = comp.matrix();
-            const newX = m.a * curX + m.b * curTheta;
-            const newTheta = m.c * curX + m.d * curTheta;
-            curX = newX; curTheta = newTheta;
+            const relX = curX - comp.x;   // ray height relative to this lens's own axis
+            const newRelX = m.a * relX + m.b * curTheta;
+            const newTheta = m.c * relX + m.d * curTheta;
+            curX = comp.x + newRelX; curTheta = newTheta;
           } else if (comp.type === "sink") {
             ray.finalX = curX; ray.finalTheta = curTheta;
             comp.lastResult.rays.push(ray);
           }
         }
-        if (ray.alive) { ray.finalX = curX; ray.finalTheta = curTheta; }
+        ray.finalX = curX; ray.finalTheta = curTheta;
       }
       // group this source's bundle per sink
       for (const comp of optics) {
