@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Planar Optics Designer</title>
+<style>
+  :root{
+    --bg:#e7e9ec;
+    --panel:#f4f5f7;
+    --panel-border:#c7cbd1;
+    --ink:#26292e;
+    --ink-soft:#5a6069;
+    --accent:#3767a6;
+    --accent-soft:#c9d8ec;
+    --grid-major:#aeb3ba;
+    --grid-minor:#d6d9dd;
+    --axis:#6b7178;
+    --danger:#a63737;
+    --canvas-bg:#fbfbfc;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: "Segoe UI", Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:13px;
+    overflow:hidden;
+  }
+  #app{
+    display:grid;
+    grid-template-columns: 1fr 6px 300px;
+    grid-template-rows: 44px 1fr 26px;
+    grid-template-areas:
+      "toolbar toolbar toolbar"
+      "canvas  resizer side"
+      "status  resizer side";
+    width:100vw; height:100vh;
+  }
+  #sideResizer{
+    grid-area:resizer; cursor:ew-resize; background:var(--panel-border);
+    position:relative;
+  }
+  #sideResizer:hover, #sideResizer.active{ background:var(--accent); }
+  #toolbar{
+    grid-area: toolbar;
+    display:flex; align-items:center; gap:6px;
+    padding:0 10px;
+    background:var(--panel);
+    border-bottom:1px solid var(--panel-border);
+  }
+  #toolbar .sep{ width:1px; height:24px; background:var(--panel-border); margin:0 4px;}
+  #toolbar button{
+    display:flex; align-items:center; gap:5px;
+    background:#fff; border:1px solid var(--panel-border);
+    color:var(--ink); padding:6px 10px; border-radius:3px;
+    cursor:pointer; font-size:12px; font-family:var(--sans);
+  }
+  #toolbar button:hover{ background:var(--accent-soft); }
+  #toolbar button.active{ background:var(--accent); color:#fff; border-color:var(--accent);}
+  #toolbar .grow{flex:1;}
+  #toolbar label{font-size:11px; color:var(--ink-soft); margin-right:3px;}
+  #toolbar select{
+    border:1px solid var(--panel-border); border-radius:3px; padding:4px 6px; font-size:12px;
+    background:#fff; color:var(--ink);
+  }
+  #canvasWrap{ grid-area:canvas; position:relative; background:var(--canvas-bg); overflow:hidden;}
+  #canvas{ position:absolute; top:0; left:0; }
+  #side{
+    grid-area:side; background:var(--panel);
+    overflow-y:auto; padding:10px;
+    min-width:220px;
+  }
+  #status{
+    grid-area:status; background:var(--panel); border-top:1px solid var(--panel-border);
+    display:flex; align-items:center; padding:0 10px; font-size:11px; color:var(--ink-soft);
+    gap:16px; font-family:var(--mono);
+  }
+  h3{ font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft); margin:14px 0 6px; }
+  h3:first-child{ margin-top:0; }
+  table{ width:100%; border-collapse:collapse; font-size:11px; font-family:var(--mono);}
+  table th, table td{ border:1px solid var(--panel-border); padding:3px 5px; text-align:right;}
+  table th{ background:#e9ebee; font-weight:600;}
+  table td.l, table th.l{ text-align:left;}
+  .metric{ display:flex; justify-content:space-between; padding:2px 0; font-family:var(--mono); font-size:12px;}
+  .metric span:first-child{ color:var(--ink-soft);}
+  .clip-item{ font-size:11px; color:var(--danger); padding:2px 0;}
+  .empty-note{ font-size:11px; color:var(--ink-soft); font-style:italic;}
+
+  /* modal: floating, draggable, resizable property panel (not a blocking overlay) */
+  #modalOverlay{
+    position:fixed; inset:0; pointer-events:none;
+    display:none; z-index:50;
+  }
+  #modalOverlay.show{ display:block; }
+  #modal{
+    position:absolute; pointer-events:auto;
+    background:#fff; border:1px solid var(--panel-border); border-radius:6px;
+    width:320px; height:auto; min-width:260px; min-height:220px;
+    max-width:90vw; max-height:85vh;
+    box-shadow:0 10px 34px rgba(0,0,0,.28);
+    resize:both; overflow:auto;
+    display:flex; flex-direction:column;
+  }
+  #modal .modal-head{
+    padding:10px 14px; border-bottom:1px solid var(--panel-border);
+    font-weight:600; font-size:13px;
+    cursor:move; user-select:none;
+    display:flex; align-items:center; justify-content:space-between;
+    flex:0 0 auto;
+  }
+  #modal .modal-head .modal-close{
+    cursor:pointer; color:var(--ink-soft); font-size:14px; padding:0 4px; border:none; background:none;
+  }
+  #modal .modal-head .modal-close:hover{ color:var(--danger); }
+  #modal .modal-body{ padding:12px 14px; display:flex; flex-direction:column; gap:8px; overflow-y:auto; flex:1 1 auto;}
+  #modal .modal-foot{
+    padding:10px 14px; border-top:1px solid var(--panel-border);
+    display:flex; justify-content:space-between; gap:8px;
+    flex:0 0 auto;
+  }
+  .field{ display:flex; flex-direction:column; gap:3px;}
+  .field label{ font-size:11px; color:var(--ink-soft);}
+  .field input, .field select{
+    border:1px solid var(--panel-border); border-radius:3px; padding:5px 7px; font-size:12px;
+    font-family:var(--mono);
+  }
+  .field input.invalid{ border-color:var(--danger); background:#fdecec;}
+  .btn{ border:1px solid var(--panel-border); background:#fff; color:var(--ink); padding:6px 12px; border-radius:3px; cursor:pointer; font-size:12px;}
+  .btn:hover{ background:var(--accent-soft);}
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff;}
+  .btn.danger{ background:#fff; border-color:var(--danger); color:var(--danger);}
+  .btn.danger:hover{ background:#fbeaea;}
+  #fileInput{ display:none; }
+
+  /* roller dial number picker */
+  .roller-field{
+    display:flex; align-items:stretch; border:1px solid var(--panel-border); border-radius:3px;
+    overflow:hidden; height:28px; background:#fff;
+  }
+  .roller-field .roller-btn{
+    width:22px; flex:0 0 auto; border:none; background:#eef0f2; color:var(--ink-soft);
+    cursor:pointer; font-size:12px; line-height:1;
+  }
+  .roller-field .roller-btn:hover{ background:var(--accent-soft); color:var(--ink); }
+  .roller-field .roller-btn:active{ background:var(--accent); color:#fff; }
+  .roller-field .roller-value{
+    flex:1 1 auto; display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:12px; cursor:ew-resize; user-select:none;
+    border-left:1px solid var(--panel-border); border-right:1px solid var(--panel-border);
+    background:repeating-linear-gradient(90deg, #fafbfc 0 3px, #f2f3f5 3px 4px);
+    position:relative;
+  }
+  .roller-field .roller-value.dragging{ background:var(--accent-soft); }
+  .roller-field .roller-value input{
+    width:100%; height:100%; border:none; text-align:center; font-family:var(--mono);
+    font-size:12px; padding:0; background:transparent;
+  }
+  .field-row{ display:flex; align-items:center; gap:8px; }
+  .field-row label{ font-size:11px; color:var(--ink-soft); flex:1; }
+  .field-row input[type="checkbox"]{ width:15px; height:15px; }
+  .dialog-settings{
+    margin-top:6px; padding-top:10px; border-top:1px dashed var(--panel-border);
+    display:flex; flex-direction:column; gap:8px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar">
+    <button data-mode="select">Select</button>
+    <button data-mode="source">Add Source</button>
+    <button data-mode="lens">Add Lens</button>
+    <button data-mode="sink">Add Sink</button>
+    <div class="sep"></div>
+    <button id="btnRun">Run Simulation</button>
+    <div class="sep"></div>
+    <button id="btnSave">Save</button>
+    <button id="btnLoad">Load</button>
+    <div class="sep"></div>
+    <button id="btnFit">Fit View</button>
+    <div class="grow"></div>
+    <label>Snap</label>
+    <select id="snapSelect">
+      <option value="1">1 mm</option>
+      <option value="2">2 mm</option>
+      <option value="5" selected>5 mm</option>
+      <option value="10">10 mm</option>
+      <option value="25">25 mm</option>
+      <option value="50">50 mm</option>
+    </select>
+    <div class="sep"></div>
+    <label>Ray Colors</label>
+    <select id="colorProfileSelect">
+      <option value="grayscale" selected>Grayscale</option>
+      <option value="spectrum">Spectrum</option>
+    </select>
+  </div>
+
+  <div id="canvasWrap">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div id="sideResizer"></div>
+
+  <div id="side">
+    <h3>Selection</h3>
+    <div id="selectionInfo" class="empty-note">No component selected.</div>
+
+    <h3>Simulation Output</h3>
+    <div id="outputMetrics" class="empty-note">Run the simulation to see results.</div>
+
+    <h3>Ray Table</h3>
+    <div id="rayTableWrap" class="empty-note">No rays traced yet.</div>
+
+    <h3>Clipping Report</h3>
+    <div id="clipReport" class="empty-note">No clipping detected.</div>
+  </div>
+
+  <div id="status">
+    <span id="statusMode">Mode: Select</span>
+    <span id="statusZoom">Zoom: 100%</span>
+    <span id="statusCursor">x: -- z: --</span>
+    <span id="statusCount">Components: 0</span>
+  </div>
+</div>
+
+<div id="modalOverlay">
+  <div id="modal">
+    <div class="modal-head" id="modalDragHandle">
+      <span id="modalTitle">Edit Component</span>
+      <button class="modal-close" id="modalClose" title="Close">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot">
+      <button class="btn danger" id="modalDelete">Delete</button>
+      <div style="flex:1"></div>
+      <button class="btn" id="modalCancel">Cancel</button>
+      <button class="btn primary" id="modalSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept="application/json">
+
+<script>
+"use strict";
+
+/* =========================================================================
+   RAY
+   ========================================================================= */
+class Ray {
+  constructor(x, theta, kind, sourceId, fraction, label) {
+    this.x = x;                 // mm
+    this.theta = theta;         // radians
+    this.kind = kind;           // 'top' | 'bottom' | 'mid'
+    this.sourceId = sourceId;
+    this.fraction = fraction === undefined ? 0.5 : fraction; // 0 = lowest ray, 1 = highest ray in the bundle
+    this.label = label || kind;
+    this.alive = true;
+    this.clippedBy = null;
+    this.clipLocation = null;   // {x,z}
+    this.path = [];             // array of {x,z} polyline points actually traversed
+    this.finalX = x;
+    this.finalTheta = theta;
+  }
+}
+
+/* =========================================================================
+   COMPONENT (base) + subclasses
+   ========================================================================= */
+let __idCounter = 1;
+function nextId(prefix) { return prefix + "_" + (__idCounter++); }
+
+class Component {
+  constructor(type, x, z) {
+    this.id = nextId(type);
+    this.type = type;           // 'source' | 'lens' | 'sink'
+    this.name = type[0].toUpperCase() + type.slice(1);
+    this.class = "generic";
+    this.x = x || 0;
+    this.z = z || 0;
+    this.height = 20;
+    this.thickness = 2;
+  }
+  clamp() {
+    if (!isFinite(this.x)) this.x = 0;
+    if (!isFinite(this.z)) this.z = 0;
+    if (!isFinite(this.height) || this.height <= 0) this.height = 1;
+    if (!isFinite(this.thickness) || this.thickness < 0) this.thickness = 0;
+  }
+  aperturePasses(rayX) {
+    return Math.abs(rayX) <= this.height / 2;
+  }
+  toJSON() {
+    return { id: this.id, type: this.type, name: this.name, class: this.class,
+      x: this.x, z: this.z, height: this.height, thickness: this.thickness };
+  }
+}
+
+class Source extends Component {
+  constructor(x, z) {
+    super("source", x, z);
+    this.class = "laser";
+    this.beamWidth = 10;       // mm, full width
+    this.pointing = 0;         // deg
+    this.divergence = 5;       // deg full angle
+    this.rayCount = 3;         // number of rays traced, 1-99, evenly spaced across beamWidth
+  }
+  clamp() {
+    super.clamp();
+    if (!isFinite(this.beamWidth) || this.beamWidth < 0) this.beamWidth = 0;
+    if (!isFinite(this.pointing)) this.pointing = 0;
+    if (!isFinite(this.divergence) || this.divergence < 0) this.divergence = 0;
+    if (!isFinite(this.rayCount)) this.rayCount = 3;
+    this.rayCount = Math.round(this.rayCount);
+    this.rayCount = Math.max(1, Math.min(99, this.rayCount));
+  }
+  generateRays() {
+    const degToRad = Math.PI / 180;
+    const n = this.rayCount;
+    const rays = [];
+    for (let i = 0; i < n; i++) {
+      const t = n === 1 ? 0.5 : i / (n - 1);   // 0 = bottom-most ray, 1 = top-most ray
+      const x = -this.beamWidth / 2 + t * this.beamWidth;
+      const angleDeg = (this.pointing - this.divergence / 2) + t * this.divergence;
+      const kind = (i === n - 1) ? "top" : (i === 0) ? "bottom" : "mid";
+      const label = n <= 3 ? (kind === "mid" ? "middle" : kind) : `ray ${i + 1}/${n}`;
+      rays.push(new Ray(x, angleDeg * degToRad, kind, this.id, t, label));
+    }
+    return rays;
+  }
+  toJSON() {
+    return Object.assign(super.toJSON(), {
+      beamWidth: this.beamWidth, pointing: this.pointing, divergence: this.divergence, rayCount: this.rayCount
+    });
+  }
+}
+
+const LENS_TYPES = ["Thin", "Plano Convex", "Plano Concave", "Bi Convex", "Bi Concave", "Positive Meniscus", "Negative Meniscus"];
+
+class Lens extends Component {
+  constructor(x, z) {
+    super("lens", x, z);
+    this.class = "optic";
+    this.focalLength = 100;    // mm
+    this.lensType = "Thin";
+  }
+  clamp() {
+    super.clamp();
+    if (!isFinite(this.focalLength) || this.focalLength === 0) this.focalLength = 100;
+    if (LENS_TYPES.indexOf(this.lensType) === -1) this.lensType = "Thin";
+  }
+  matrix() {
+    // [1 0; -1/f 1]
+    return { a: 1, b: 0, c: -1 / this.focalLength, d: 1 };
+  }
+  toJSON() {
+    return Object.assign(super.toJSON(), { focalLength: this.focalLength, lensType: this.lensType });
+  }
+}
+
+class Sink extends Component {
+  constructor(x, z) {
+    super("sink", x, z);
+    this.class = "detector";
+    this.lastResult = null; // filled in by SimulationEngine
+  }
+  toJSON() { return super.toJSON(); }
+}
+
+function componentFromJSON(o) {
+  let c;
+  if (o.type === "source") c = new Source(o.x, o.z);
+  else if (o.type === "lens") c = new Lens(o.x, o.z);
+  else c = new Sink(o.x, o.z);
+  Object.assign(c, o);
+  c.id = o.id || c.id;
+  c.clamp();
+  return c;
+}
+
+/* =========================================================================
+   SIMULATION ENGINE
+   ========================================================================= */
+class SimulationEngine {
+  constructor(app) { this.app = app; }
+
+  run(components) {
+    const sources = components.filter(c => c.type === "source");
+    const optics = components.filter(c => c.type !== "source").sort((a, b) => a.z - b.z);
+    for (const s of optics) if (s.type === "sink") s.lastResult = { rays: [], byBundle: [] };
+
+    const allBundles = []; // {sourceId, rays:[top,mid,bot] at each sink z reached}
+
+    for (const source of sources) {
+      const rays = source.generateRays();
+      for (const ray of rays) {
+        ray.path.push({ x: ray.x, z: source.z });
+        let curX = ray.x, curTheta = ray.theta, curZ = source.z;
+        for (const comp of optics) {
+          if (comp.z < curZ) continue; // only forward components
+          const d = comp.z - curZ;
+          // propagation matrix [1 d; 0 1]
+          const propX = curX + d * curTheta;
+          const propTheta = curTheta;
+          // aperture check at this component's plane
+          if (!comp.aperturePasses(propX)) {
+            ray.alive = false;
+            ray.clippedBy = comp.id;
+            ray.clipLocation = { x: propX, z: comp.z };
+            ray.path.push({ x: propX, z: comp.z });
+            curX = propX; curTheta = propTheta; curZ = comp.z;
+            break;
+          }
+          ray.path.push({ x: propX, z: comp.z });
+          curX = propX; curTheta = propTheta; curZ = comp.z;
+
+          if (comp.type === "lens") {
+            const m = comp.matrix();
+            const newX = m.a * curX + m.b * curTheta;
+            const newTheta = m.c * curX + m.d * curTheta;
+            curX = newX; curTheta = newTheta;
+          } else if (comp.type === "sink") {
+            ray.finalX = curX; ray.finalTheta = curTheta;
+            comp.lastResult.rays.push(ray);
+          }
+        }
+        if (ray.alive) { ray.finalX = curX; ray.finalTheta = curTheta; }
+      }
+      // group this source's bundle per sink
+      for (const comp of optics) {
+        if (comp.type !== "sink") continue;
+        const bundleRays = rays.filter(r => comp.lastResult.rays.indexOf(r) !== -1);
+        if (bundleRays.length) {
+          comp.lastResult.byBundle.push({ sourceId: source.id, sourceName: source.name, rays: bundleRays, sourceBeamWidth: source.beamWidth, sourceDivergence: source.divergence });
+        }
+      }
+    }
+
+    // compute metrics per sink
+    for (const comp of optics) {
+      if (comp.type !== "sink") continue;
+      this.computeSinkMetrics(comp);
+    }
+    return { sources, optics };
+  }
+
+  computeSinkMetrics(sink) {
+    const aliveRays = sink.lastResult.rays.filter(r => r.alive);
+    let spotDiameter = null, centroid = null;
+    if (aliveRays.length) {
+      const xs = aliveRays.map(r => r.finalX);
+      spotDiameter = Math.max(...xs) - Math.min(...xs);
+      centroid = xs.reduce((a, b) => a + b, 0) / xs.length;
+    }
+    // magnification per bundle (top vs bottom ray), averaged if multiple sources
+    const mags = [], angMags = [];
+    for (const bundle of sink.lastResult.byBundle) {
+      const top = bundle.rays.find(r => r.kind === "top");
+      const bot = bundle.rays.find(r => r.kind === "bottom");
+      if (top && bot && top.alive && bot.alive) {
+        const initSpread = bundle.sourceBeamWidth;
+        const finalSpread = top.finalX - bot.finalX;
+        if (initSpread !== 0) mags.push(finalSpread / initSpread);
+        const initAngSpread = bundle.sourceDivergence * Math.PI / 180;
+        const finalAngSpread = top.finalTheta - bot.finalTheta;
+        if (initAngSpread !== 0) angMags.push(finalAngSpread / initAngSpread);
+      }
+    }
+    const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+    sink.lastResult.spotDiameter = spotDiameter;
+    sink.lastResult.centroid = centroid;
+    sink.lastResult.magnification = avg(mags);
+    sink.lastResult.angularMagnification = avg(angMags);
+    sink.lastResult.clippingReport = sink.lastResult.rays
+      .filter(r => !r.alive)
+      .map(r => ({ sourceId: r.sourceId, kind: r.kind, clippedBy: r.clippedBy, clipLocation: r.clipLocation }));
+  }
+}
+
+/* =========================================================================
+   SERIALIZER
+   ========================================================================= */
+class Serializer {
+  static toJSON(app) {
+    return {
+      version: 1,
+      gridSnap: app.snap,
+      zoom: app.view.zoom,
+      components: app.components.map(c => c.toJSON())
+    };
+  }
+  static download(app) {
+    const data = JSON.stringify(Serializer.toJSON(app), null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "optics-design.json";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+  static fromJSON(app, obj) {
+    try {
+      if (!obj || !Array.isArray(obj.components)) throw new Error("Malformed file: missing components array.");
+      const comps = [];
+      for (const raw of obj.components) {
+        try { comps.push(componentFromJSON(raw)); } catch (e) { /* skip bad component */ }
+      }
+      app.components = comps;
+      app.snap = [1, 2, 5, 10, 25, 50].indexOf(obj.gridSnap) !== -1 ? obj.gridSnap : 5;
+      app.view.zoom = (typeof obj.zoom === "number" && isFinite(obj.zoom) && obj.zoom > 0) ? obj.zoom : 1.0;
+      document.getElementById("snapSelect").value = String(app.snap);
+      app.selected = null;
+      app.runSimulation();
+      app.view.fit(app.components);
+      app.render();
+    } catch (e) {
+      alert("Could not load file: " + e.message);
+    }
+  }
+}
+
+/* =========================================================================
+   CANVAS VIEW  (world <-> screen transform, grid & ray/component drawing)
+   ========================================================================= */
+class CanvasView {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.zoom = 1.0;           // pixels per mm at zoom=1 is baseScale
+    this.baseScale = 2.0;      // px per mm
+    this.panX = 60;            // screen px offset for world z=0
+    this.panY = 0;             // screen px offset for world x=0 (set on resize)
+    this.resize();
+  }
+  resize() {
+    const wrap = document.getElementById("canvasWrap");
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    this.canvas.width = w; this.canvas.height = h;
+    if (!this._initialized) { this.panY = h / 2; this._initialized = true; }
+  }
+  get scale() { return this.baseScale * this.zoom; }
+  worldToScreen(x, z) {
+    return { sx: this.panX + z * this.scale, sy: this.panY - x * this.scale };
+  }
+  screenToWorld(sx, sy) {
+    return { x: (this.panY - sy) / this.scale, z: (sx - this.panX) / this.scale };
+  }
+  fit(components) {
+    if (!components.length) { this.zoom = 1; this.panX = 60; this.panY = this.canvas.height / 2; return; }
+    let minZ = Infinity, maxZ = -Infinity, maxH = 0;
+    for (const c of components) {
+      minZ = Math.min(minZ, c.z); maxZ = Math.max(maxZ, c.z);
+      maxH = Math.max(maxH, c.height);
+    }
+    const spanZ = Math.max(maxZ - minZ, 10);
+    const spanX = Math.max(maxH * 1.5, 20);
+    const availW = this.canvas.width - 100;
+    const availH = this.canvas.height - 60;
+    const scaleZ = availW / spanZ;
+    const scaleX = availH / spanX;
+    this.zoom = Math.max(0.05, Math.min(scaleZ, scaleX) / this.baseScale);
+    this.panX = 60 - minZ * this.scale;
+    this.panY = this.canvas.height / 2;
+  }
+  niceStep(mmPerMajorTarget) {
+    const steps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
+    for (const s of steps) if (s >= mmPerMajorTarget) return s;
+    return 1000;
+  }
+  drawGrid() {
+    const ctx = this.ctx, w = this.canvas.width, h = this.canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = getCSS("--canvas-bg"); ctx.fillRect(0, 0, w, h);
+
+    const targetPx = 80;
+    const majorMM = this.niceStep(targetPx / this.scale);
+    const minorMM = majorMM / 5;
+
+    const worldLeft = this.screenToWorld(0, 0).z;
+    const worldRight = this.screenToWorld(w, 0).z;
+    const worldTop = this.screenToWorld(0, 0).x;
+    const worldBottom = this.screenToWorld(0, h).x;
+
+    ctx.lineWidth = 1;
+    // minor grid
+    ctx.strokeStyle = getCSS("--grid-minor");
+    this._gridLines(worldLeft, worldRight, minorMM, true);
+    this._gridLines(worldBottom, worldTop, minorMM, false);
+    // major grid
+    ctx.strokeStyle = getCSS("--grid-major");
+    this._gridLines(worldLeft, worldRight, majorMM, true, true);
+    this._gridLines(worldBottom, worldTop, majorMM, false, true);
+
+    // axes
+    ctx.strokeStyle = getCSS("--axis");
+    ctx.lineWidth = 1.4;
+    const zero = this.worldToScreen(0, 0);
+    ctx.beginPath(); ctx.moveTo(0, zero.sy); ctx.lineTo(w, zero.sy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(zero.sx, 0); ctx.lineTo(zero.sx, h); ctx.stroke();
+  }
+  _gridLines(min, max, step, vertical, labelIt) {
+    const ctx = this.ctx;
+    const start = Math.floor(min / step) * step;
+    ctx.font = "10px monospace";
+    ctx.fillStyle = getCSS("--ink-soft");
+    for (let v = start; v <= max; v += step) {
+      if (vertical) {
+        const s = this.worldToScreen(0, v);
+        ctx.beginPath(); ctx.moveTo(s.sx, 0); ctx.lineTo(s.sx, this.canvas.height); ctx.stroke();
+        if (labelIt && Math.abs(v) > 1e-9) ctx.fillText(Math.round(v) + "", s.sx + 2, this.canvas.height - 4);
+      } else {
+        const s = this.worldToScreen(v, 0);
+        ctx.beginPath(); ctx.moveTo(0, s.sy); ctx.lineTo(this.canvas.width, s.sy); ctx.stroke();
+        if (labelIt && Math.abs(v) > 1e-9) ctx.fillText(Math.round(v) + "", 2, s.sy - 2);
+      }
+    }
+  }
+
+  drawComponent(comp, selected) {
+    const ctx = this.ctx;
+    const p = this.worldToScreen(comp.x, comp.z);
+    const halfHpx = (comp.height / 2) * this.scale;
+    ctx.save();
+    ctx.translate(p.sx, p.sy);
+
+    if (comp.type === "source") this._drawSource(ctx, halfHpx);
+    else if (comp.type === "lens") this._drawLens(ctx, comp, halfHpx);
+    else this._drawSink(ctx, halfHpx);
+
+    if (selected) {
+      ctx.strokeStyle = getCSS("--accent");
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(-16, -halfHpx - 8, 32, halfHpx * 2 + 16);
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+
+    // label
+    ctx.fillStyle = getCSS("--ink");
+    ctx.font = "11px sans-serif";
+    ctx.fillText(comp.name, p.sx + 10, p.sy - halfHpx - 10);
+  }
+  _drawSource(ctx, halfH) {
+    ctx.strokeStyle = getCSS("--ink"); ctx.fillStyle = "#5a6069";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(0, -halfH); ctx.lineTo(0, halfH); ctx.stroke();
+    // emitter triangle pointing +z
+    ctx.beginPath();
+    ctx.moveTo(0, -6); ctx.lineTo(12, 0); ctx.lineTo(0, 6); ctx.closePath();
+    ctx.fill();
+  }
+  _drawLens(ctx, comp, halfH) {
+    ctx.strokeStyle = getCSS("--ink"); ctx.lineWidth = 1.5;
+    const t = Math.max(comp.thickness * this.scale, 4);
+    const type = comp.lensType;
+    ctx.beginPath();
+    if (type === "Bi Convex") {
+      ctx.moveTo(-t, -halfH);
+      ctx.quadraticCurveTo(t * 2, 0, -t, halfH);
+      ctx.quadraticCurveTo(-t * 3, 0, -t, -halfH);
+    } else if (type === "Bi Concave") {
+      ctx.moveTo(-t, -halfH);
+      ctx.quadraticCurveTo(0, -halfH * 0.6, t, -halfH);
+      ctx.lineTo(t, halfH);
+      ctx.quadraticCurveTo(0, halfH * 0.6, -t, halfH);
+      ctx.closePath();
+    } else if (type === "Plano Convex") {
+      ctx.moveTo(0, -halfH);
+      ctx.lineTo(0, halfH);
+      ctx.quadraticCurveTo(t * 2, 0, 0, -halfH);
+    } else if (type === "Plano Concave") {
+      ctx.moveTo(0, -halfH);
+      ctx.lineTo(0, halfH);
+      ctx.lineTo(t, halfH);
+      ctx.quadraticCurveTo(0, 0, t, -halfH);
+      ctx.closePath();
+    } else if (type === "Positive Meniscus") {
+      ctx.moveTo(-t, -halfH);
+      ctx.quadraticCurveTo(t * 1.5, 0, -t, halfH);
+      ctx.quadraticCurveTo(0, 0, -t, -halfH);
+    } else if (type === "Negative Meniscus") {
+      ctx.moveTo(-t, -halfH);
+      ctx.quadraticCurveTo(t * 0.6, 0, -t, halfH);
+      ctx.quadraticCurveTo(t * 1.6, 0, -t, -halfH);
+    } else {
+      // Thin lens symbol: vertical line with arrowhead ticks
+      ctx.moveTo(0, -halfH); ctx.lineTo(0, halfH);
+      ctx.moveTo(-6, -halfH); ctx.lineTo(0, -halfH - 8); ctx.lineTo(6, -halfH);
+      ctx.moveTo(-6, halfH); ctx.lineTo(0, halfH + 8); ctx.lineTo(6, halfH);
+    }
+    ctx.stroke();
+  }
+  _drawSink(ctx, halfH) {
+    ctx.strokeStyle = getCSS("--ink"); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, -halfH); ctx.lineTo(0, halfH); ctx.stroke();
+    ctx.lineWidth = 1;
+    for (let i = -halfH; i <= halfH; i += 5) {
+      ctx.beginPath(); ctx.moveTo(-4, i); ctx.lineTo(4, i); ctx.stroke();
+    }
+  }
+
+  drawRayPath(ray, profile) {
+    if (!ray.path.length) return;
+    const ctx = this.ctx;
+    ctx.strokeStyle = rayColor(ray.fraction, profile);
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    const p0 = this.worldToScreen(ray.path[0].x, ray.path[0].z);
+    ctx.moveTo(p0.sx, p0.sy);
+    for (let i = 1; i < ray.path.length; i++) {
+      const p = this.worldToScreen(ray.path[i].x, ray.path[i].z);
+      ctx.lineTo(p.sx, p.sy);
+    }
+    ctx.stroke();
+    if (!ray.alive && ray.clipLocation) {
+      const p = this.worldToScreen(ray.clipLocation.x, ray.clipLocation.z);
+      ctx.fillStyle = getCSS("--danger");
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+}
+
+/* ---- ray color profiles -------------------------------------------------
+   fraction (t) is 0 at the lowest ray in a source's bundle and 1 at the
+   highest ray, evenly spaced in between for however many rays are configured. */
+const GRAY_LOW = [0x43, 0x47, 0x4d];   // darkest, bottom-most ray
+const GRAY_HIGH = [0xc3, 0xc8, 0xce];  // lightest, top-most ray
+const SPECTRUM_STOPS = ["#e53935", "#fb8c00", "#fdd835", "#43a047", "#1e88e5", "#8e24aa"]; // R O Y G B V
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgbToStr(rgb) { return `rgb(${rgb[0]|0},${rgb[1]|0},${rgb[2]|0})`; }
+function lerpRgb(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+
+function rayColor(fraction, profile) {
+  const t = Math.max(0, Math.min(1, isFinite(fraction) ? fraction : 0.5));
+  if (profile === "spectrum") {
+    const stops = SPECTRUM_STOPS.map(hexToRgb);
+    const s = 1 - t; // top (t=1) -> Red (first stop); bottom (t=0) -> Violet (last stop)
+    const pos = s * (stops.length - 1);
+    const i0 = Math.floor(pos), i1 = Math.min(i0 + 1, stops.length - 1);
+    return rgbToStr(lerpRgb(stops[i0], stops[i1], pos - i0));
+  }
+  return rgbToStr(lerpRgb(GRAY_LOW, GRAY_HIGH, t));
+}
+function getCSS(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+/* =========================================================================
+   TOOLBAR
+   ========================================================================= */
+class Toolbar {
+  constructor(app) {
+    this.app = app;
+    document.querySelectorAll("#toolbar button[data-mode]").forEach(btn => {
+      btn.addEventListener("click", () => app.setMode(btn.dataset.mode));
+    });
+    document.getElementById("btnRun").addEventListener("click", () => app.runSimulation());
+    document.getElementById("btnSave").addEventListener("click", () => Serializer.download(app));
+    document.getElementById("btnLoad").addEventListener("click", () => document.getElementById("fileInput").click());
+    document.getElementById("btnFit").addEventListener("click", () => { app.view.fit(app.components); app.render(); });
+    document.getElementById("snapSelect").addEventListener("change", e => { app.snap = parseFloat(e.target.value); });
+    document.getElementById("colorProfileSelect").addEventListener("change", e => { app.colorProfile = e.target.value; app.render(); });
+    document.getElementById("fileInput").addEventListener("change", e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const obj = JSON.parse(reader.result);
+          Serializer.fromJSON(app, obj);
+        } catch (err) { alert("Invalid JSON file."); }
+      };
+      reader.readAsText(file);
+      e.target.value = "";
+    });
+  }
+  setActive(mode) {
+    document.querySelectorAll("#toolbar button[data-mode]").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.mode === mode);
+    });
+    document.getElementById("statusMode").textContent = "Mode: " + mode[0].toUpperCase() + mode.slice(1);
+  }
+}
+
+/* =========================================================================
+   ROLLER INPUT  (roller dial number picker: drag-scrub, wheel, +/- buttons,
+   or click to type a value directly)
+   ========================================================================= */
+class RollerInput {
+  constructor(initialValue, step, onChange) {
+    this.value = initialValue;
+    this.step = step > 0 ? step : 1;
+    this.onChange = onChange;
+    this.editing = false;
+    this.editInput = null;
+    this.decimals = this._decimalsForStep(this.step);
+    this._build();
+  }
+  _decimalsForStep(step) {
+    if (!isFinite(step) || step <= 0) return 2;
+    if (step >= 1) return 0;
+    const s = step.toString();
+    const dot = s.indexOf(".");
+    return dot === -1 ? 0 : Math.min(6, s.length - dot - 1);
+  }
+  _build() {
+    this.el = document.createElement("div"); this.el.className = "roller-field";
+    this.decBtn = document.createElement("button");
+    this.decBtn.type = "button"; this.decBtn.className = "roller-btn"; this.decBtn.textContent = "\u2013";
+    this.valueEl = document.createElement("div"); this.valueEl.className = "roller-value";
+    this.incBtn = document.createElement("button");
+    this.incBtn.type = "button"; this.incBtn.className = "roller-btn"; this.incBtn.textContent = "+";
+    this.el.appendChild(this.decBtn); this.el.appendChild(this.valueEl); this.el.appendChild(this.incBtn);
+    this._renderValue();
+
+    this.decBtn.addEventListener("click", () => this.setValue(this.value - this.step));
+    this.incBtn.addEventListener("click", () => this.setValue(this.value + this.step));
+
+    this.valueEl.addEventListener("wheel", e => {
+      e.preventDefault();
+      this.setValue(this.value + (e.deltaY < 0 ? this.step : -this.step));
+    }, { passive: false });
+
+    this.valueEl.addEventListener("mousedown", e => {
+      if (this.editing) return;
+      e.preventDefault();
+      const startX = e.clientX, startVal = this.value;
+      let dragged = false;
+      const onMove = me => {
+        const dx = me.clientX - startX;
+        if (Math.abs(dx) > 3) { dragged = true; this.valueEl.classList.add("dragging"); }
+        const steps = Math.round(dx / 6);
+        this.setValue(startVal + steps * this.step);
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        this.valueEl.classList.remove("dragging");
+        if (!dragged) this._enterEdit();
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+  }
+  _enterEdit() {
+    this.editing = true;
+    this.valueEl.innerHTML = "";
+    const input = document.createElement("input");
+    input.type = "text"; input.value = this._formatted(this.value);
+    this.valueEl.appendChild(input);
+    this.editInput = input;
+    input.focus(); input.select();
+    const commit = () => {
+      const v = parseFloat(input.value);
+      this.editing = false;
+      this.editInput = null;
+      if (isFinite(v)) this.setValue(v); else this._renderValue();
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+      else if (e.key === "Escape") { e.preventDefault(); this.editing = false; this.editInput = null; this._renderValue(); }
+    });
+  }
+  _formatted(v) { return this.decimals > 0 ? v.toFixed(this.decimals) : String(Math.round(v)); }
+  _renderValue() { this.valueEl.textContent = this._formatted(this.value); }
+  setValue(v) {
+    this.value = parseFloat(v.toFixed(6));
+    if (this.editing && this.editInput) {
+      // keep the live input box in sync while the user is mid-edit (e.g. scrubbing
+      // or wheeling over the field while it still shows the text cursor)
+      this.editInput.value = this._formatted(this.value);
+    } else if (!this.editing) {
+      this._renderValue();
+    }
+    if (this.onChange) this.onChange(this.value);
+  }
+  setStep(step) {
+    this.step = step > 0 ? step : this.step;
+    this.decimals = this._decimalsForStep(this.step);
+    if (!this.editing) this._renderValue();
+  }
+}
+
+/* =========================================================================
+   PROPERTY DIALOG
+   ========================================================================= */
+class PropertyDialog {
+  constructor(app) {
+    this.app = app;
+    this.overlay = document.getElementById("modalOverlay");
+    this.modal = document.getElementById("modal");
+    this.body = document.getElementById("modalBody");
+    this.title = document.getElementById("modalTitle");
+    this.rollers = [];
+    this.pending = null;
+    document.getElementById("modalCancel").addEventListener("click", () => this.close());
+    document.getElementById("modalClose").addEventListener("click", () => this.close());
+    document.getElementById("modalSave").addEventListener("click", () => this.save());
+    document.getElementById("modalDelete").addEventListener("click", () => {
+      this.app.deleteComponent(this.comp);
+      this.close();
+    });
+    this._bindDrag();
+  }
+  _bindDrag() {
+    const handle = document.getElementById("modalDragHandle");
+    handle.addEventListener("mousedown", e => {
+      if (e.target.closest(".modal-close")) return;
+      const rect = this.modal.getBoundingClientRect();
+      const startX = e.clientX, startY = e.clientY;
+      const startLeft = rect.left, startTop = rect.top;
+      const onMove = me => {
+        this.modal.style.left = Math.max(0, startLeft + (me.clientX - startX)) + "px";
+        this.modal.style.top = Math.max(0, startTop + (me.clientY - startY)) + "px";
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      e.preventDefault();
+    });
+  }
+  fieldsFor(comp) {
+    const common = [
+      { key: "name", label: "Name", kind: "text" },
+      { key: "class", label: "Class", kind: "text" },
+      { key: "x", label: "X position (mm)", kind: "number" },
+      { key: "z", label: "Z position (mm)", kind: "number" },
+      { key: "height", label: "Height (mm)", kind: "number" },
+      { key: "thickness", label: "Thickness (mm)", kind: "number" }
+    ];
+    if (comp.type === "source") {
+      return common.concat([
+        { key: "beamWidth", label: "Beam width (mm)", kind: "number" },
+        { key: "pointing", label: "Pointing angle (deg)", kind: "number" },
+        { key: "divergence", label: "Divergence angle (deg)", kind: "number" },
+        { key: "rayCount", label: "Number of rays (1-99)", kind: "number" }
+      ]);
+    }
+    if (comp.type === "lens") {
+      return common.concat([
+        { key: "focalLength", label: "Focal length (mm)", kind: "number" },
+        { key: "lensType", label: "Lens type", kind: "select", options: LENS_TYPES }
+      ]);
+    }
+    return common;
+  }
+  open(comp, atPoint) {
+    this.comp = comp;
+    this.pending = {};
+    this.rollers = [];
+    this.title.textContent = "Edit " + comp.type[0].toUpperCase() + comp.type.slice(1);
+    this.body.innerHTML = "";
+
+    for (const f of this.fieldsFor(comp)) {
+      const wrap = document.createElement("div"); wrap.className = "field";
+      const label = document.createElement("label"); label.textContent = f.label;
+      wrap.appendChild(label);
+
+      if (f.kind === "select") {
+        const input = document.createElement("select");
+        for (const opt of f.options) {
+          const o = document.createElement("option"); o.value = opt; o.textContent = opt;
+          if (comp[f.key] === opt) o.selected = true;
+          input.appendChild(o);
+        }
+        input.addEventListener("change", () => this._liveApply(f.key, input.value));
+        wrap.appendChild(input);
+      } else if (f.kind === "number") {
+        const roller = new RollerInput(comp[f.key], this.app.rollerStep, val => this._liveApply(f.key, val));
+        this.rollers.push(roller);
+        wrap.appendChild(roller.el);
+      } else {
+        const input = document.createElement("input");
+        input.type = "text"; input.value = comp[f.key];
+        input.addEventListener("input", () => this._liveApply(f.key, input.value));
+        wrap.appendChild(input);
+      }
+      this.body.appendChild(wrap);
+    }
+
+    // dialog-wide settings: shared step size for all number pickers, and
+    // whether edits recompute the simulation live.
+    const settings = document.createElement("div"); settings.className = "dialog-settings";
+
+    const stepWrap = document.createElement("div"); stepWrap.className = "field";
+    const stepLabel = document.createElement("label"); stepLabel.textContent = "Number picker step size";
+    const stepInput = document.createElement("input");
+    stepInput.type = "text"; stepInput.value = this.app.rollerStep;
+    stepInput.addEventListener("change", () => {
+      const v = parseFloat(stepInput.value);
+      if (isFinite(v) && v > 0) {
+        this.app.rollerStep = v;
+        this.rollers.forEach(r => r.setStep(v));
+      } else {
+        stepInput.value = this.app.rollerStep;
+      }
+    });
+    stepWrap.appendChild(stepLabel); stepWrap.appendChild(stepInput);
+    settings.appendChild(stepWrap);
+
+    const recomputeRow = document.createElement("div"); recomputeRow.className = "field-row";
+    const recomputeLabel = document.createElement("label");
+    recomputeLabel.textContent = "Recompute on change (interactive tuning)";
+    recomputeLabel.htmlFor = "recomputeOnChangeBox";
+    const recomputeBox = document.createElement("input");
+    recomputeBox.type = "checkbox"; recomputeBox.id = "recomputeOnChangeBox";
+    recomputeBox.checked = this.app.recomputeOnChange;
+    recomputeBox.addEventListener("change", () => { this.app.recomputeOnChange = recomputeBox.checked; });
+    recomputeRow.appendChild(recomputeLabel); recomputeRow.appendChild(recomputeBox);
+    settings.appendChild(recomputeRow);
+
+    this.body.appendChild(settings);
+
+    this.overlay.classList.add("show");
+    this._positionAt(atPoint);
+  }
+  _positionAt(pt) {
+    const modal = this.modal;
+    const w = modal.getBoundingClientRect().width || 320;
+    let left = pt ? pt.x + 16 : (window.innerWidth - w) / 2;
+    let top = pt ? pt.y - 20 : (window.innerHeight - 320) / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - 260));
+    top = Math.max(8, Math.min(top, window.innerHeight - 120));
+    modal.style.left = left + "px";
+    modal.style.top = top + "px";
+  }
+  _liveApply(key, rawValue) {
+    if (!this.comp) return;
+    this.pending[key] = rawValue;
+    if (this.app.recomputeOnChange) {
+      this._commitPending();
+      this.app.runSimulation();
+    }
+  }
+  _commitPending() {
+    if (!this.comp || !this.pending) return;
+    for (const key in this.pending) this.comp[key] = this.pending[key];
+    this.comp.clamp();
+    this.pending = {};
+  }
+  close() { this.overlay.classList.remove("show"); this.comp = null; this.pending = null; this.rollers = []; }
+  save() {
+    if (!this.comp) return;
+    this._commitPending();
+    this.app.runSimulation();
+    this.close();
+    this.app.render();
+  }
+}
+
+/* =========================================================================
+   APPLICATION
+   ========================================================================= */
+class Application {
+  constructor() {
+    this.canvas = document.getElementById("canvas");
+    this.view = new CanvasView(this.canvas);
+    this.toolbar = new Toolbar(this);
+    this.dialog = new PropertyDialog(this);
+    this.engine = new SimulationEngine(this);
+
+    this.components = [];
+    this.selected = null;
+    this.mode = "select";
+    this.snap = 5;
+    this.lastSimResult = null;
+    this.rollerStep = 1;            // shared step size for property-dialog roller pickers
+    this.recomputeOnChange = true;  // if true, dialog edits resimulate live before Save
+    this.colorProfile = "grayscale"; // 'grayscale' | 'spectrum'
+
+    this.dragging = null;   // {comp, startMouse, startCompPos}
+    this.panning = null;
+
+    this.toolbar.setActive("select");
+    this._bindEvents();
+    this._bindSideResizer();
+    window.addEventListener("resize", () => { this.view.resize(); this.render(); });
+    this._seedExample();
+    this.runSimulation();
+    this.view.fit(this.components);
+    this.render();
+  }
+
+  _seedExample() {
+    const src = new Source(0, 0);
+    src.name = "HeNe Laser"; src.beamWidth = 6; src.divergence = 2;
+    const lens = new Lens(0, 150);
+    lens.name = "Focusing Lens"; lens.focalLength = 100; lens.lensType = "Plano Convex"; lens.height = 25;
+    const sink = new Sink(0, 300);
+    sink.name = "Detector"; sink.height = 40;
+    this.components.push(src, lens, sink);
+  }
+
+  setMode(mode) { this.mode = mode; this.toolbar.setActive(mode); }
+
+  snapVal(v) { return Math.round(v / this.snap) * this.snap; }
+
+  runSimulation() {
+    this.lastSimResult = this.engine.run(this.components);
+    this.updateSidePanel();
+    this.render();
+  }
+
+  deleteComponent(comp) {
+    this.components = this.components.filter(c => c !== comp);
+    if (this.selected === comp) this.selected = null;
+    this.runSimulation();
+  }
+
+  duplicateComponent(comp) {
+    const copy = componentFromJSON(comp.toJSON());
+    copy.id = nextId(copy.type);
+    copy.name = comp.name + " copy";
+    copy.z = comp.z + this.snap * 2;
+    this.components.push(copy);
+    this.selected = copy;
+    this.runSimulation();
+  }
+
+  hitTest(worldX, worldZ) {
+    const scale = this.view.scale;
+    let best = null, bestDist = Infinity;
+    for (const c of this.components) {
+      const dz = (c.z - worldZ) * scale;
+      const dx = (c.x - worldX) * scale;
+      const halfH = (c.height / 2) * scale + 10;
+      if (Math.abs(dz) < 16 && Math.abs(dx) < halfH) {
+        const dist = Math.hypot(dz, dx);
+        if (dist < bestDist) { bestDist = dist; best = c; }
+      }
+    }
+    return best;
+  }
+
+  _bindEvents() {
+    const canvas = this.canvas;
+    canvas.addEventListener("wheel", e => {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const before = this.view.screenToWorld(mx, my);
+      const factor = Math.pow(1.0015, -e.deltaY);
+      this.view.zoom = Math.max(0.02, Math.min(200, this.view.zoom * factor));
+      const after = this.view.worldToScreen(before.x, before.z);
+      this.view.panX += mx - after.sx;
+      this.view.panY += my - after.sy;
+      this.render();
+    }, { passive: false });
+
+    canvas.addEventListener("mousedown", e => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      if (e.button === 1) {
+        this.panning = { startX: mx, startY: my, startPanX: this.view.panX, startPanY: this.view.panY };
+        e.preventDefault();
+        return;
+      }
+      if (e.button !== 0) return;
+      const world = this.view.screenToWorld(mx, my);
+
+      if (this.mode === "select") {
+        const hit = this.hitTest(world.x, world.z);
+        this.selected = hit;
+        if (hit) {
+          this.dragging = { comp: hit, startMouse: { mx, my }, startPos: { x: hit.x, z: hit.z } };
+        }
+        this.updateSidePanel();
+        this.render();
+      } else {
+        let comp;
+        if (this.mode === "source") comp = new Source(this.snapVal(world.x), this.snapVal(world.z));
+        else if (this.mode === "lens") comp = new Lens(this.snapVal(world.x), this.snapVal(world.z));
+        else comp = new Sink(this.snapVal(world.x), this.snapVal(world.z));
+        this.components.push(comp);
+        this.selected = comp;
+        this.setMode("select");
+        this.runSimulation();
+      }
+    });
+
+    canvas.addEventListener("dblclick", e => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const world = this.view.screenToWorld(mx, my);
+      const hit = this.hitTest(world.x, world.z);
+      if (hit) { this.selected = hit; this.dialog.open(hit, { x: e.clientX, y: e.clientY }); }
+    });
+
+    window.addEventListener("mousemove", e => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      if (mx >= 0 && my >= 0 && mx <= rect.width && my <= rect.height) {
+        const w = this.view.screenToWorld(mx, my);
+        document.getElementById("statusCursor").textContent =
+          "x: " + w.x.toFixed(1) + " z: " + w.z.toFixed(1);
+      }
+      if (this.panning) {
+        this.view.panX = this.panning.startPanX + (mx - this.panning.startX);
+        this.view.panY = this.panning.startPanY + (my - this.panning.startY);
+        this.render();
+        return;
+      }
+      if (this.dragging) {
+        const dz = (mx - this.dragging.startMouse.mx) / this.view.scale;
+        const dx = -(my - this.dragging.startMouse.my) / this.view.scale;
+        const comp = this.dragging.comp;
+        comp.x = this.snapVal(this.dragging.startPos.x + dx);
+        comp.z = this.snapVal(this.dragging.startPos.z + dz);
+        this.runSimulation();
+      }
+    });
+    window.addEventListener("mouseup", () => {
+      if (this.dragging) this.dragging = null;
+      this.panning = null;
+    });
+    canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+    window.addEventListener("keydown", e => {
+      if (document.getElementById("modalOverlay").classList.contains("show")) return;
+      if (!this.selected) return;
+      const tag = (document.activeElement && document.activeElement.tagName) || "";
+      if (tag === "INPUT" || tag === "SELECT") return;
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        this.deleteComponent(this.selected);
+      } else if (e.key === "ArrowUp") { e.preventDefault(); this.selected.x += this.snap; this.runSimulation(); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); this.selected.x -= this.snap; this.runSimulation(); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); this.selected.z -= this.snap; this.runSimulation(); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); this.selected.z += this.snap; this.runSimulation(); }
+      else if (e.ctrlKey && e.key.toLowerCase() === "d") { e.preventDefault(); this.duplicateComponent(this.selected); }
+      else if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); Serializer.download(this); }
+      else if (e.ctrlKey && e.key.toLowerCase() === "o") { e.preventDefault(); document.getElementById("fileInput").click(); }
+    });
+  }
+
+  _bindSideResizer() {
+    const resizer = document.getElementById("sideResizer");
+    const appEl = document.getElementById("app");
+    const side = document.getElementById("side");
+    resizer.addEventListener("mousedown", e => {
+      e.preventDefault();
+      resizer.classList.add("active");
+      const startX = e.clientX;
+      const startWidth = side.getBoundingClientRect().width;
+      const onMove = me => {
+        let newWidth = startWidth - (me.clientX - startX);
+        newWidth = Math.max(220, Math.min(newWidth, window.innerWidth - 300));
+        appEl.style.gridTemplateColumns = `1fr 6px ${newWidth}px`;
+        this.view.resize();
+        this.render();
+      };
+      const onUp = () => {
+        resizer.classList.remove("active");
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+  }
+
+  updateSidePanel() {
+    document.getElementById("statusCount").textContent = "Components: " + this.components.length;
+    document.getElementById("statusZoom").textContent = "Zoom: " + Math.round(this.view.zoom * 100) + "%";
+
+    // selection info
+    const info = document.getElementById("selectionInfo");
+    if (this.selected) {
+      const c = this.selected;
+      let extra = "";
+      if (c.type === "source") extra = `<div class="metric"><span>Beam width</span><span>${c.beamWidth} mm</span></div><div class="metric"><span>Pointing</span><span>${c.pointing}&deg;</span></div><div class="metric"><span>Divergence</span><span>${c.divergence}&deg;</span></div><div class="metric"><span>Ray count</span><span>${c.rayCount}</span></div>`;
+      if (c.type === "lens") extra = `<div class="metric"><span>Focal length</span><span>${c.focalLength} mm</span></div><div class="metric"><span>Lens type</span><span>${c.lensType}</span></div>`;
+      info.innerHTML = `<div class="metric"><span>Name</span><span>${escapeHtml(c.name)}</span></div>
+        <div class="metric"><span>Type</span><span>${c.type}</span></div>
+        <div class="metric"><span>x, z</span><span>${c.x.toFixed(1)}, ${c.z.toFixed(1)} mm</span></div>
+        <div class="metric"><span>Height</span><span>${c.height} mm</span></div>${extra}`;
+      info.classList.remove("empty-note");
+    } else {
+      info.textContent = "No component selected.";
+      info.classList.add("empty-note");
+    }
+
+    // metrics + ray table + clip report: use first sink with results (or all sinks concatenated)
+    const sinks = this.components.filter(c => c.type === "sink");
+    const metricsEl = document.getElementById("outputMetrics");
+    const rayWrap = document.getElementById("rayTableWrap");
+    const clipEl = document.getElementById("clipReport");
+
+    if (!sinks.length || !sinks.some(s => s.lastResult && s.lastResult.rays.length)) {
+      metricsEl.textContent = "Run the simulation to see results.";
+      metricsEl.classList.add("empty-note");
+      rayWrap.textContent = "No rays traced yet.";
+      rayWrap.classList.add("empty-note");
+      clipEl.textContent = "No clipping detected.";
+      clipEl.classList.add("empty-note");
+      return;
+    }
+
+    let metricsHtml = "";
+    let rayRows = "";
+    let clipHtml = "";
+    let anyClip = false;
+    for (const sink of sinks) {
+      const r = sink.lastResult;
+      if (!r || !r.rays.length) continue;
+      metricsHtml += `<div style="margin-bottom:6px;font-weight:600;">${escapeHtml(sink.name)}</div>`;
+      metricsHtml += metricRow("Spot diameter", fmt(r.spotDiameter, "mm"));
+      metricsHtml += metricRow("Centroid", fmt(r.centroid, "mm"));
+      metricsHtml += metricRow("Magnification", fmt(r.magnification, "x"));
+      metricsHtml += metricRow("Angular magnification", fmt(r.angularMagnification, "x"));
+
+      for (const bundle of r.byBundle) {
+        for (const ray of bundle.rays) {
+          rayRows += `<tr>
+            <td class="l">${bundle.sourceName} / ${ray.label}</td>
+            <td>${ray.alive ? "yes" : "no"}</td>
+            <td>${ray.finalX.toFixed(2)}</td>
+            <td>${(ray.finalTheta * 180 / Math.PI).toFixed(3)}&deg;</td>
+            <td>${ray.alive ? "no" : "yes"}</td>
+            <td class="l">${ray.clippedBy || "-"}</td>
+          </tr>`;
+        }
+      }
+      if (r.clippingReport.length) {
+        anyClip = true;
+        for (const cr of r.clippingReport) {
+          clipHtml += `<div class="clip-item">${cr.kind} ray clipped by ${cr.clippedBy} at z=${cr.clipLocation.z.toFixed(1)}, x=${cr.clipLocation.x.toFixed(2)}</div>`;
+        }
+      }
+    }
+    metricsEl.innerHTML = metricsHtml || "No sink results yet.";
+    metricsEl.classList.remove("empty-note");
+
+    rayWrap.innerHTML = `<table><thead><tr>
+        <th class="l">Ray</th><th>Alive</th><th>Final X</th><th>Final Angle</th><th>Clipped</th><th class="l">Clipped By</th>
+      </tr></thead><tbody>${rayRows}</tbody></table>`;
+    rayWrap.classList.remove("empty-note");
+
+    if (anyClip) { clipEl.innerHTML = clipHtml; clipEl.classList.remove("empty-note"); }
+    else { clipEl.textContent = "No clipping detected."; clipEl.classList.add("empty-note"); }
+  }
+
+  render() {
+    this.view.drawGrid();
+    // draw ray paths first (under components)
+    if (this.lastSimResult) {
+      for (const sink of this.components.filter(c => c.type === "sink")) {
+        if (!sink.lastResult) continue;
+        for (const bundle of sink.lastResult.byBundle) {
+          for (const ray of bundle.rays) this.view.drawRayPath(ray, this.colorProfile);
+        }
+      }
+    }
+    for (const c of this.components) this.view.drawComponent(c, c === this.selected);
+    document.getElementById("statusZoom").textContent = "Zoom: " + Math.round(this.view.zoom * 100) + "%";
+  }
+}
+
+function metricRow(label, value) {
+  return `<div class="metric"><span>${label}</span><span>${value}</span></div>`;
+}
+function fmt(v, unit) {
+  if (v === null || v === undefined || !isFinite(v)) return "—";
+  return v.toFixed(3) + " " + unit;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+}
+
+/* boot */
+window.addEventListener("DOMContentLoaded", () => { window.__app = new Application(); });
+</script>
+</body>
+</html>
