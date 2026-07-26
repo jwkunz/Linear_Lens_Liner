@@ -347,19 +347,87 @@ class Lens extends Component {
     this.class = "optic";
     this.focalLength = 100;    // mm
     this.lensType = "Thin";
+    this.refractiveIndex = 1.5; // index of refraction, n
   }
   clamp() {
     super.clamp();
     if (!isFinite(this.focalLength) || this.focalLength === 0) this.focalLength = 100;
     if (LENS_TYPES.indexOf(this.lensType) === -1) this.lensType = "Thin";
+    if (!isFinite(this.refractiveIndex) || this.refractiveIndex <= 1) this.refractiveIndex = 1.5;
   }
   matrix() {
     // [1 0; -1/f 1]
     return { a: 1, b: 0, c: -1 / this.focalLength, d: 1 };
   }
   toJSON() {
-    return Object.assign(super.toJSON(), { focalLength: this.focalLength, lensType: this.lensType });
+    return Object.assign(super.toJSON(), { focalLength: this.focalLength, lensType: this.lensType, refractiveIndex: this.refractiveIndex });
   }
+
+  /* Derive physical surface geometry (radii, sag, edge thickness) from focal length,
+     index of refraction, diameter, and center thickness using the thin-lens equation
+     1/f = (n-1)(1/R1 - 1/R2), with the standard sign convention: a radius is positive
+     when its center of curvature lies on the +z (downstream) side of its own vertex.
+     Bi-Convex/Bi-Concave assume symmetric radii; meniscus types assume a representative
+     2.5:1 ratio between the two radii, since one focal length alone can't fix both. */
+  computeGeometry() {
+    const n = this.refractiveIndex;
+    const f = Math.abs(this.focalLength);
+    const D = this.height;
+    const h = D / 2;
+    const ct = this.thickness;
+
+    if (this.lensType === "Thin") {
+      return {
+        physical: false, type: this.lensType, diameter: D, centerThickness: ct,
+        index: n, focalLength: f,
+        note: "Thin lens is an idealized paraxial element with no defined surface curvature; no physical solid is derived."
+      };
+    }
+
+    let R1 = Infinity, R2 = Infinity, shapeNote = "";
+    const k = 2.5; // meniscus shape-factor ratio (representative, not unique)
+    switch (this.lensType) {
+      case "Plano Convex": R1 = Infinity; R2 = -(n - 1) * f; break;
+      case "Plano Concave": R1 = Infinity; R2 = (n - 1) * f; break;
+      case "Bi Convex": { const R = 2 * (n - 1) * f; R1 = R; R2 = -R; break; }
+      case "Bi Concave": { const R = 2 * (n - 1) * f; R1 = -R; R2 = R; break; }
+      case "Positive Meniscus":
+        R1 = (n - 1) * f * (1 - 1 / k); R2 = k * R1;
+        shapeNote = `Shape factor R2/R1 = ${k} assumed for this converging meniscus (representative choice, not a unique solution).`;
+        break;
+      case "Negative Meniscus":
+        R2 = (n - 1) * f * (1 - 1 / k); R1 = k * R2;
+        shapeNote = `Shape factor R1/R2 = ${k} assumed for this diverging meniscus (representative choice, not a unique solution).`;
+        break;
+    }
+
+    const sag1 = sagSigned(R1, h);
+    const sag2 = sagSigned(R2, h);
+    const warnings = [];
+    if (sag1 === null || sag2 === null) {
+      warnings.push("Computed surface radius is smaller than the lens semi-diameter — geometry is infeasible for the given focal length, index, and diameter.");
+    }
+    const edgeThickness = (sag1 === null || sag2 === null) ? null : ct + sag2 - sag1;
+    if (edgeThickness !== null && edgeThickness <= 0) {
+      warnings.push("Computed edge thickness is zero or negative — this design is not physically realizable with the current parameters.");
+    }
+
+    return {
+      physical: true, type: this.lensType, diameter: D, centerThickness: ct, edgeThickness,
+      index: n, focalLength: f, R1, R2, sag1, sag2, shapeNote, warnings
+    };
+  }
+}
+function sagMagnitude(Rabs, halfD) {
+  if (!isFinite(Rabs)) return 0;
+  if (Rabs < halfD) return null; // physically impossible: radius smaller than the lens semi-diameter
+  return Rabs - Math.sqrt(Rabs * Rabs - halfD * halfD);
+}
+function sagSigned(R, halfD) {
+  if (!isFinite(R)) return 0;
+  const s = sagMagnitude(Math.abs(R), halfD);
+  if (s === null) return null;
+  return R >= 0 ? s : -s;
 }
 
 class Sink extends Component {
@@ -485,6 +553,124 @@ class SimulationEngine {
 /* =========================================================================
    SERIALIZER
    ========================================================================= */
+function downloadTextFile(filename, text) {
+  const blob = new Blob([text], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function buildGeometryReportText(lens) {
+  const g = lens.computeGeometry();
+  const pad = (s, w) => String(s).padEnd(w);
+  const lines = [];
+  lines.push("LENS GEOMETRY REPORT");
+  lines.push("=".repeat(56));
+  lines.push(`Name:                 ${lens.name}`);
+  lines.push(`Lens type:            ${g.type}`);
+  lines.push(`Focal length:         ${g.focalLength.toFixed(3)} mm`);
+  lines.push(`Index of refraction:  ${g.index.toFixed(5)}`);
+  lines.push(`Diameter:             ${g.diameter.toFixed(3)} mm`);
+  lines.push(`Center thickness:     ${g.centerThickness.toFixed(3)} mm`);
+  lines.push("-".repeat(56));
+  if (!g.physical) {
+    lines.push(g.note);
+  } else {
+    lines.push(`Edge thickness:       ${g.edgeThickness === null ? "N/A" : g.edgeThickness.toFixed(3) + " mm"}`);
+    lines.push("");
+    lines.push(pad("Surface", 12) + pad("Radius (mm)", 18) + pad("Sag (mm)", 12));
+    lines.push(pad("Front", 12) + pad(isFinite(g.R1) ? g.R1.toFixed(3) : "Flat (\u221e)", 18) + pad(g.sag1 === null ? "N/A" : g.sag1.toFixed(4), 12));
+    lines.push(pad("Back", 12) + pad(isFinite(g.R2) ? g.R2.toFixed(3) : "Flat (\u221e)", 18) + pad(g.sag2 === null ? "N/A" : g.sag2.toFixed(4), 12));
+    if (g.shapeNote) { lines.push(""); lines.push("Note: " + g.shapeNote); }
+    if (g.warnings.length) {
+      lines.push("");
+      lines.push("WARNINGS:");
+      g.warnings.forEach(w => lines.push("  - " + w));
+    }
+  }
+  lines.push("=".repeat(56));
+  lines.push("Sign convention: a radius is positive when its center of curvature");
+  lines.push("lies on the +z (downstream) side of that surface's own vertex.");
+  return lines.join("\n");
+}
+
+function buildFreeCADMacro(lens) {
+  const g = lens.computeGeometry();
+  const D = g.diameter, ct = g.centerThickness;
+  const safeName = (lens.name.replace(/[^A-Za-z0-9_]/g, "_") || "Lens");
+
+  if (!g.physical) {
+    return [
+      "# FreeCAD macro auto-generated by Planar Optics Designer",
+      `# Lens: ${lens.name}  (Thin lens - idealized, no physical surface curvature)`,
+      "# A flat symbolic disc is generated as a placeholder only.",
+      "import FreeCAD as App",
+      "import Part",
+      "",
+      `doc = App.ActiveDocument if App.ActiveDocument else App.newDocument("${safeName}")`,
+      `diameter = ${D}`,
+      `thickness = ${ct || 1}`,
+      "disc = Part.makeCylinder(diameter / 2.0, thickness)",
+      `Part.show(disc, "${safeName}_symbolic")`,
+      "doc.recompute()"
+    ].join("\n");
+  }
+
+  const R1 = g.R1, R2 = g.R2;
+  const margin = Math.max(D * 3, ct * 3, 5);
+
+  function surfaceCode(R, vertexZ, isFront, sphereVar) {
+    if (!isFinite(R)) return `# ${isFront ? "Front" : "Back"} surface is flat -- already flat on the base cylinder, no cut needed`;
+    const center = vertexZ + R;
+    const common = isFront ? (R > 0) : (R < 0);
+    return [
+      `${sphereVar} = Part.makeSphere(${Math.abs(R).toFixed(4)})`,
+      `${sphereVar}.translate(App.Vector(0, 0, ${center.toFixed(4)}))`,
+      `solid = solid.${common ? "common" : "cut"}(${sphereVar})`
+    ].join("\n");
+  }
+
+  const lines = [];
+  lines.push("# FreeCAD macro auto-generated by Planar Optics Designer");
+  lines.push(`# Lens: ${lens.name}  (${g.type})`);
+  lines.push(`# Focal length: ${g.focalLength} mm   Index of refraction: ${g.index}`);
+  if (g.shapeNote) lines.push(`# ${g.shapeNote}`);
+  g.warnings.forEach(w => lines.push(`# WARNING: ${w}`));
+  lines.push("# Run via Macro > Macros... inside FreeCAD, or paste into the Python console.");
+  lines.push("# If a surface looks clipped for very long radii, increase `margin` below and rerun.");
+  lines.push("");
+  lines.push("import FreeCAD as App");
+  lines.push("import Part");
+  lines.push("");
+  lines.push(`doc = App.ActiveDocument if App.ActiveDocument else App.newDocument("${safeName}")`);
+  lines.push("");
+  lines.push(`diameter = ${D}`);
+  lines.push("radius = diameter / 2.0");
+  lines.push(`center_thickness = ${ct}`);
+  lines.push(`margin = ${margin.toFixed(4)}`);
+  lines.push("");
+  lines.push("# Base blank: flat cylinder spanning both vertex planes plus margin on both sides");
+  lines.push("solid = Part.makeCylinder(radius, center_thickness + 2 * margin, App.Vector(0, 0, -margin))");
+  lines.push("");
+  lines.push("# --- Front surface (vertex at z = 0) ---");
+  lines.push(surfaceCode(R1, 0, true, "sphere_front"));
+  lines.push("");
+  lines.push("# --- Back surface (vertex at z = center_thickness) ---");
+  lines.push(surfaceCode(R2, ct, false, "sphere_back"));
+  lines.push("");
+  lines.push(`Part.show(solid, "${safeName}")`);
+  lines.push("doc.recompute()");
+  lines.push("");
+  lines.push("try:");
+  lines.push("    import FreeCADGui as Gui");
+  lines.push("    Gui.ActiveDocument.ActiveView.fitAll()");
+  lines.push("except Exception:");
+  lines.push("    pass");
+  return lines.join("\n");
+}
+
 class Serializer {
   static toJSON(app) {
     return {
@@ -953,7 +1139,8 @@ class PropertyDialog {
     if (comp.type === "lens") {
       return common.concat([
         { key: "focalLength", label: "Focal length (mm)", kind: "number" },
-        { key: "lensType", label: "Lens type", kind: "select", options: LENS_TYPES }
+        { key: "lensType", label: "Lens type", kind: "select", options: LENS_TYPES },
+        { key: "refractiveIndex", label: "Index of refraction (n)", kind: "number" }
       ]);
     }
     return common;
@@ -980,9 +1167,34 @@ class PropertyDialog {
         input.addEventListener("change", () => this._liveApply(f.key, input.value));
         wrap.appendChild(input);
       } else if (f.kind === "number") {
-        const roller = new RollerInput(comp[f.key], this.app.rollerStep, val => this._liveApply(f.key, val));
-        this.rollers.push(roller);
+        // Index of refraction is a dimensionless ratio (~1.0-3.0), not a spatial
+        // dimension, so it keeps its own fine fixed step rather than sharing the
+        // dialog's step size (which is normally set in whole/coarse mm units and
+        // would otherwise round n down to an integer).
+        const isIndexField = f.key === "refractiveIndex";
+        const step = isIndexField ? 0.01 : this.app.rollerStep;
+        const roller = new RollerInput(comp[f.key], step, val => this._liveApply(f.key, val));
+        if (!isIndexField) this.rollers.push(roller);
         wrap.appendChild(roller.el);
+        if (f.key === "refractiveIndex") {
+          const calcRow = document.createElement("div");
+          calcRow.className = "field-row"; calcRow.style.marginTop = "3px";
+          const calcLabel = document.createElement("label");
+          calcLabel.textContent = "from relative permittivity \u03b5r ="; calcLabel.style.flex = "0 0 auto";
+          const epsInput = document.createElement("input");
+          epsInput.type = "text"; epsInput.placeholder = "\u03b5r"; epsInput.style.width = "56px";
+          const calcBtn = document.createElement("button");
+          calcBtn.type = "button"; calcBtn.className = "btn";
+          calcBtn.style.padding = "4px 8px"; calcBtn.style.fontSize = "11px";
+          calcBtn.textContent = "\u2192 n";
+          calcBtn.title = "n = \u221a\u03b5r (assumes non-magnetic material, \u03bcr = 1)";
+          calcBtn.addEventListener("click", () => {
+            const eps = parseFloat(epsInput.value);
+            if (isFinite(eps) && eps > 0) roller.setValue(Math.sqrt(eps));
+          });
+          calcRow.appendChild(calcLabel); calcRow.appendChild(epsInput); calcRow.appendChild(calcBtn);
+          wrap.appendChild(calcRow);
+        }
       } else {
         const input = document.createElement("input");
         input.type = "text"; input.value = comp[f.key];
@@ -990,6 +1202,42 @@ class PropertyDialog {
         wrap.appendChild(input);
       }
       this.body.appendChild(wrap);
+    }
+
+    if (comp.type === "lens") {
+      const toolsWrap = document.createElement("div");
+      toolsWrap.className = "dialog-settings";
+      const toolsLabel = document.createElement("label");
+      toolsLabel.textContent = "Lens geometry tools";
+      toolsLabel.style.fontSize = "11px"; toolsLabel.style.color = "var(--ink-soft)";
+      toolsWrap.appendChild(toolsLabel);
+
+      const toolsRow = document.createElement("div");
+      toolsRow.style.display = "flex"; toolsRow.style.gap = "8px"; toolsRow.style.marginTop = "4px";
+
+      const reportBtn = document.createElement("button");
+      reportBtn.type = "button"; reportBtn.className = "btn"; reportBtn.style.flex = "1";
+      reportBtn.textContent = "Geometry Report";
+      reportBtn.title = "Download a tabulated text report of this lens's physical dimensions";
+      reportBtn.addEventListener("click", () => {
+        this._commitPending();
+        const safeName = (comp.name || "lens").replace(/[^A-Za-z0-9_-]/g, "_");
+        downloadTextFile(`${safeName}_geometry_report.txt`, buildGeometryReportText(comp));
+      });
+
+      const freecadBtn = document.createElement("button");
+      freecadBtn.type = "button"; freecadBtn.className = "btn"; freecadBtn.style.flex = "1";
+      freecadBtn.textContent = "Generate in FreeCAD";
+      freecadBtn.title = "Download a Python macro that builds this lens as a solid body in FreeCAD";
+      freecadBtn.addEventListener("click", () => {
+        this._commitPending();
+        const safeName = (comp.name || "lens").replace(/[^A-Za-z0-9_-]/g, "_");
+        downloadTextFile(`${safeName}_freecad_macro.FCMacro`, buildFreeCADMacro(comp));
+      });
+
+      toolsRow.appendChild(reportBtn); toolsRow.appendChild(freecadBtn);
+      toolsWrap.appendChild(toolsRow);
+      this.body.appendChild(toolsWrap);
     }
 
     // dialog-wide settings: shared step size for all number pickers, and
