@@ -133,6 +133,47 @@
   .btn.danger:hover{ background:#fbeaea;}
   #fileInput{ display:none; }
 
+  /* Fourier optics floating panel (same floating/draggable/resizable pattern as #modal) */
+  #fourierOverlay{
+    position:fixed; inset:0; pointer-events:none; display:none; z-index:51;
+  }
+  #fourierOverlay.show{ display:block; }
+  #fourierPanel{
+    position:absolute; pointer-events:auto;
+    background:#fff; border:1px solid var(--panel-border); border-radius:6px;
+    width:460px; height:auto; min-width:380px; min-height:300px;
+    max-width:92vw; max-height:88vh;
+    box-shadow:0 10px 34px rgba(0,0,0,.28);
+    resize:both; overflow:auto;
+    display:flex; flex-direction:column;
+  }
+  #fourierPanel .modal-body{ gap:10px; }
+  .fourier-row{ display:flex; align-items:flex-end; gap:8px; }
+  .fourier-row .field{ flex:1; }
+  .fourier-row button.btn{ flex:0 0 auto; height:28px; padding:0 10px; }
+  .fourier-section-title{
+    font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);
+    margin:4px 0 0; padding-top:8px; border-top:1px dashed var(--panel-border);
+  }
+  .fourier-section-title:first-child{ border-top:none; padding-top:0; margin-top:0; }
+  #fourierProgressWrap{ display:none; flex-direction:column; gap:4px; }
+  #fourierProgressWrap.show{ display:flex; }
+  #fourierProgressBar{
+    width:100%; height:10px; border-radius:5px; background:#e3e5e8; overflow:hidden;
+    border:1px solid var(--panel-border);
+  }
+  #fourierProgressFill{ height:100%; width:0%; background:var(--accent); transition:width .08s linear; }
+  #fourierStatusText{ font-size:11px; color:var(--ink-soft); font-family:var(--mono); }
+  #fourierError{ font-size:11px; color:var(--danger); display:none; }
+  #fourierError.show{ display:block; }
+  #fourierPlots{
+    display:none; grid-template-columns:1fr 1fr; gap:8px;
+  }
+  #fourierPlots.show{ display:grid; }
+  .fourier-plot-cell{ border:1px solid var(--panel-border); border-radius:4px; padding:4px; background:#fbfbfc; }
+  .fourier-plot-cell canvas{ width:100%; display:block; }
+  .fourier-plot-title{ font-size:10px; color:var(--ink-soft); text-align:center; margin-bottom:2px; }
+
   /* roller dial number picker */
   .roller-field{
     display:flex; align-items:stretch; border:1px solid var(--panel-border); border-radius:3px;
@@ -174,6 +215,7 @@
     <button data-mode="sink">Add Sink</button>
     <div class="sep"></div>
     <button id="btnRun">Run Simulation</button>
+    <button id="btnFourier">Fourier Optics</button>
     <div class="sep"></div>
     <button id="btnSave">Save</button>
     <button id="btnLoad">Load</button>
@@ -242,6 +284,75 @@
 </div>
 
 <input type="file" id="fileInput" accept="application/json">
+
+<div id="fourierOverlay">
+  <div id="fourierPanel">
+    <div class="modal-head" id="fourierDragHandle">
+      <span>Fourier Optics &mdash; Wave Propagation</span>
+      <button class="modal-close" id="fourierClose" title="Close">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="fourierBody">
+
+      <div class="fourier-section-title">Path</div>
+      <div class="fourier-row">
+        <div class="field"><label>Source</label><select id="fourierSourceSelect"></select></div>
+        <div class="field"><label>Sink</label><select id="fourierSinkSelect"></select></div>
+      </div>
+
+      <div class="fourier-section-title">Source Field</div>
+      <div class="field">
+        <label>Source function</label>
+        <select id="fourierSourceFunc">
+          <option value="gaussian" selected>Gaussian</option>
+          <option value="boxcar">Boxcar</option>
+          <option value="triangular">Triangular</option>
+        </select>
+      </div>
+      <div class="field"><label>Wavelength (nm)</label><div id="fourierWavelengthWrap"></div></div>
+
+      <div class="fourier-section-title">Grid</div>
+      <div class="field">
+        <label>FFT size (transverse grid points)</label>
+        <select id="fourierFftSize">
+          <option value="256">256</option>
+          <option value="512">512</option>
+          <option value="1024">1024</option>
+          <option value="2048" selected>2048</option>
+          <option value="4096">4096</option>
+          <option value="8192">8192</option>
+          <option value="16384">16384</option>
+          <option value="32768">32768</option>
+        </select>
+      </div>
+      <div class="fourier-row">
+        <div class="field"><label>Box clipping height (mm)</label><div id="fourierBoxHeightWrap"></div></div>
+        <button class="btn" id="fourierAutoHeight" title="Set to 2x the tallest component in the path">Auto (2&times;)</button>
+      </div>
+      <div class="field"><label>Propagation step size (&micro;m)</label><div id="fourierStepWrap"></div></div>
+      <div class="field"><label>Media index</label><div id="fourierMediaIndexWrap"></div></div>
+
+      <div id="fourierError"></div>
+      <div id="fourierProgressWrap">
+        <div id="fourierProgressBar"><div id="fourierProgressFill"></div></div>
+        <div id="fourierStatusText">&nbsp;</div>
+      </div>
+
+      <div id="fourierPlots">
+        <div class="fourier-plot-cell"><div class="fourier-plot-title">Source amplitude</div><canvas id="plotSrcAmp" width="400" height="160"></canvas></div>
+        <div class="fourier-plot-cell"><div class="fourier-plot-title">Source unwrapped phase</div><canvas id="plotSrcPhase" width="400" height="160"></canvas></div>
+        <div class="fourier-plot-cell"><div class="fourier-plot-title">Sink amplitude</div><canvas id="plotSinkAmp" width="400" height="160"></canvas></div>
+        <div class="fourier-plot-cell"><div class="fourier-plot-title">Sink unwrapped phase</div><canvas id="plotSinkPhase" width="400" height="160"></canvas></div>
+      </div>
+
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="fourierDownload" style="display:none;">Download results.json</button>
+      <div style="flex:1"></div>
+      <button class="btn" id="fourierCancel">Close</button>
+      <button class="btn primary" id="fourierCalculate">Calculate</button>
+    </div>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -1311,6 +1422,483 @@ class PropertyDialog {
 }
 
 /* =========================================================================
+   FOURIER OPTICS  —  1D angular-spectrum split-step beam propagation (BPM)
+   ========================================================================= */
+
+function isPow2(n) { return n > 0 && (n & (n - 1)) === 0; }
+
+// In-place iterative radix-2 Cooley-Tukey FFT. re/im are Float64Array of length N (power of 2).
+function fftRadix2(re, im, invert) {
+  const N = re.length;
+  for (let i = 1, j = 0; i < N; i++) {
+    let bit = N >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i]; re[i] = re[j]; re[j] = t;
+      t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  for (let len = 2; len <= N; len <<= 1) {
+    const ang = (invert ? 1 : -1) * 2 * Math.PI / len;
+    const wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < N; i += len) {
+      let curWr = 1, curWi = 0;
+      for (let j = 0; j < len / 2; j++) {
+        const ur = re[i + j], ui = im[i + j];
+        const vr = re[i + j + len / 2] * curWr - im[i + j + len / 2] * curWi;
+        const vi = re[i + j + len / 2] * curWi + im[i + j + len / 2] * curWr;
+        re[i + j] = ur + vr; im[i + j] = ui + vi;
+        re[i + j + len / 2] = ur - vr; im[i + j + len / 2] = ui - vi;
+        const nwr = curWr * wr - curWi * wi;
+        const nwi = curWr * wi + curWi * wr;
+        curWr = nwr; curWi = nwi;
+      }
+    }
+  }
+  if (invert) { for (let i = 0; i < N; i++) { re[i] /= N; im[i] /= N; } }
+}
+
+function buildKxArray(N, dx) {
+  const kx = new Float64Array(N);
+  for (let j = 0; j < N; j++) {
+    const idx = j < N / 2 ? j : j - N;
+    kx[j] = 2 * Math.PI * idx / (N * dx);
+  }
+  return kx;
+}
+
+// Phase unwrap anchored at the peak-amplitude sample, walking outward in both directions.
+// A naive sequential (left-to-right, index 0) unwrap lets numerical noise in near-zero-amplitude
+// tail regions (where phase is essentially undefined) inject large spurious 2*pi jumps that then
+// propagate as a constant offset into the physically meaningful high-amplitude region. Anchoring
+// at the peak keeps that region correct regardless of what the noisy far tails do.
+function unwrapPhase(phase, amplitude) {
+  const n = phase.length;
+  const out = new Float64Array(n);
+  if (!n) return out;
+  let peakIdx = 0, peakVal = -Infinity;
+  if (amplitude) {
+    for (let i = 0; i < n; i++) if (amplitude[i] > peakVal) { peakVal = amplitude[i]; peakIdx = i; }
+  }
+  out[peakIdx] = phase[peakIdx];
+  let offset = 0;
+  for (let i = peakIdx + 1; i < n; i++) {
+    let diff = phase[i] - phase[i - 1];
+    while (diff > Math.PI) { offset -= 2 * Math.PI; diff -= 2 * Math.PI; }
+    while (diff < -Math.PI) { offset += 2 * Math.PI; diff += 2 * Math.PI; }
+    out[i] = phase[i] + offset;
+  }
+  offset = 0;
+  for (let i = peakIdx - 1; i >= 0; i--) {
+    let diff = phase[i] - phase[i + 1];
+    while (diff > Math.PI) { offset -= 2 * Math.PI; diff -= 2 * Math.PI; }
+    while (diff < -Math.PI) { offset += 2 * Math.PI; diff += 2 * Math.PI; }
+    out[i] = phase[i] + offset;
+  }
+  return out;
+}
+
+// angular-spectrum free-space propagation over distance dz, in place, using reference wavenumber k0n0
+function propagateFreeSpace(re, im, dz, k0n0, kx) {
+  fftRadix2(re, im, false);
+  const N = re.length;
+  for (let j = 0; j < N; j++) {
+    const kxx = kx[j];
+    const under = k0n0 * k0n0 - kxx * kxx;
+    let pr, pi;
+    if (under >= 0) {
+      const kz = Math.sqrt(under);
+      pr = Math.cos(kz * dz); pi = Math.sin(kz * dz);
+    } else {
+      const decay = Math.exp(-Math.sqrt(-under) * dz);
+      pr = decay; pi = 0;
+    }
+    const rr = re[j] * pr - im[j] * pi;
+    const ii = re[j] * pi + im[j] * pr;
+    re[j] = rr; im[j] = ii;
+  }
+  fftRadix2(re, im, true);
+}
+
+class FourierEngine {
+  // build the complex field at the source plane from the ray-model source's parameters
+  static buildInitialField(source, xGrid, wavelengthMm, sourceFunction) {
+    const N = xGrid.length;
+    const re = new Float64Array(N), im = new Float64Array(N);
+    const w = Math.max(source.beamWidth, 1e-9);
+    const halfW = w / 2;
+    const k0 = 2 * Math.PI / wavelengthMm;
+    const pointingRad = source.pointing * Math.PI / 180;
+    const divergenceRad = source.divergence * Math.PI / 180;
+    // local ray angle varies linearly across the aperture (matches the ray-trace's
+    // top/bottom divergence split): theta(x) = pointingRad + slope*x. The transverse
+    // wavevector of a plane-wave component tilted by theta is exactly k0*sin(theta), so
+    // integrating k0*sin(theta(x)) dx gives a closed form (no small-angle approximation):
+    //   phase(x) = (k0/slope) * [cos(pointingRad) - cos(theta(x))]
+    // which reduces to the earlier linear-tilt + quadratic-curvature formula for small angles.
+    const slope = divergenceRad / w;
+    const smallDivergence = Math.abs(divergenceRad) < 1e-9;
+    for (let i = 0; i < N; i++) {
+      const xRel = xGrid[i] - source.x;
+      let amp = 0;
+      if (sourceFunction === "boxcar") {
+        amp = Math.abs(xRel) <= halfW ? 1 : 0;
+      } else if (sourceFunction === "triangular") {
+        amp = Math.max(0, 1 - Math.abs(xRel) / halfW);
+      } else { // gaussian (default): beamWidth/2 treated as the 1/e amplitude half-width
+        amp = Math.exp(-(xRel * xRel) / (halfW * halfW));
+      }
+      let phase;
+      if (smallDivergence) {
+        phase = k0 * Math.sin(pointingRad) * xRel; // pure tilt, no curvature term to divide by
+      } else {
+        const thetaEdge = pointingRad + slope * xRel;
+        phase = (k0 / slope) * (Math.cos(pointingRad) - Math.cos(thetaEdge));
+      }
+      re[i] = amp * Math.cos(phase);
+      im[i] = amp * Math.sin(phase);
+    }
+    return { re, im };
+  }
+
+  // sample which lenses (with real physical geometry) are glass at (xLocal, z), else background
+  static glassIndexAt(lensCache, xGrid, zMid, mediaIndex) {
+    const N = xGrid.length;
+    const n = new Float64Array(N).fill(mediaIndex);
+    for (const lc of lensCache) {
+      if (!lc.physical) continue;
+      if (zMid < lc.zSpanMin || zMid > lc.zSpanMax) continue;
+      const halfD = lc.diameter / 2;
+      for (let i = 0; i < N; i++) {
+        const xLocal = xGrid[i] - lc.x;
+        const ax = Math.abs(xLocal);
+        if (ax > halfD) continue;
+        const s1 = sagSigned(lc.R1, ax);
+        const s2 = sagSigned(lc.R2, ax);
+        if (s1 === null || s2 === null) continue;
+        const zFront = lc.z - lc.halfCT + s1;
+        const zBack = lc.z + lc.halfCT + s2;
+        if (zMid >= zFront && zMid <= zBack) n[i] = lc.index;
+      }
+    }
+    return n;
+  }
+
+  static async run(cfg, onProgress) {
+    const { source, sink, lenses, wavelengthMm, mediaIndex, fftSize, boxHeightMm, stepMm, sourceFunction } = cfg;
+    const N = fftSize;
+    const dx = boxHeightMm / N;
+    const xGrid = new Float64Array(N);
+    for (let i = 0; i < N; i++) xGrid[i] = (i - N / 2) * dx;
+    const kx = buildKxArray(N, dx);
+    const k0 = 2 * Math.PI / wavelengthMm;
+    const k0n0 = k0 * mediaIndex;
+
+    // cache each lens's geometry once
+    const lensCache = lenses.map(lens => {
+      const g = lens.computeGeometry();
+      const halfCT = lens.thickness / 2;
+      const physical = !!g.physical && g.sag1 !== null && g.sag2 !== null && g.sag1 !== undefined && g.sag2 !== undefined;
+      const maxSag = physical ? Math.max(Math.abs(g.sag1), Math.abs(g.sag2)) : 0;
+      return {
+        id: lens.id, name: lens.name, x: lens.x, z: lens.z, height: lens.height, diameter: lens.height,
+        physical, thin: lens.lensType === "Thin",
+        focalLength: lens.focalLength,
+        index: lens.refractiveIndex,
+        halfCT,
+        R1: physical ? g.R1 : Infinity,
+        R2: physical ? g.R2 : Infinity,
+        zSpanMin: lens.z - halfCT - maxSag - 1e-6,
+        zSpanMax: lens.z + halfCT + maxSag + 1e-6
+      };
+    });
+
+    const { re, im } = FourierEngine.buildInitialField(source, xGrid, wavelengthMm, sourceFunction);
+    const sourceRe = re.slice(), sourceIm = im.slice();
+
+    const totalDist = sink.z - source.z;
+    if (totalDist <= 0) throw new Error("Sink must be downstream of the source (sink z > source z).");
+    const totalSteps = Math.max(1, Math.ceil(totalDist / stepMm));
+    const appliedThinLens = new Set();
+    const appliedAperture = new Set();
+
+    let z = source.z;
+    const chunk = Math.max(1, Math.floor(totalSteps / 150)); // yield to the UI ~150 times regardless of scale
+
+    for (let s = 0; s < totalSteps; s++) {
+      const dz = Math.min(stepMm, sink.z - z);
+      const zStart = z, zEnd = z + dz, zMid = z + dz / 2;
+
+      propagateFreeSpace(re, im, dz / 2, k0n0, kx);
+
+      // physical (meshed) lens material: local index-contrast phase correction
+      const nProfile = FourierEngine.glassIndexAt(lensCache, xGrid, zMid, mediaIndex);
+      for (let i = 0; i < N; i++) {
+        const dPhi = k0 * (nProfile[i] - mediaIndex) * dz;
+        if (dPhi !== 0) {
+          const c = Math.cos(dPhi), sN = Math.sin(dPhi);
+          const rr = re[i] * c - im[i] * sN;
+          const ii = re[i] * sN + im[i] * c;
+          re[i] = rr; im[i] = ii;
+        }
+      }
+
+      // idealized Thin lenses: apply the same zero-thickness phase screen the ray-trace uses,
+      // the instant the march crosses that lens's z position
+      for (const lc of lensCache) {
+        if (!lc.thin || appliedThinLens.has(lc.id)) continue;
+        if (lc.z >= zStart && lc.z < zEnd) {
+          for (let i = 0; i < N; i++) {
+            const xRel = xGrid[i] - lc.x;
+            const dPhi = -k0 * (xRel * xRel) / (2 * lc.focalLength);
+            const c = Math.cos(dPhi), sN = Math.sin(dPhi);
+            const rr = re[i] * c - im[i] * sN;
+            const ii = re[i] * sN + im[i] * c;
+            re[i] = rr; im[i] = ii;
+          }
+          appliedThinLens.add(lc.id);
+        }
+      }
+
+      // hard aperture stop: every lens's mechanical mount blocks light outside its clear aperture,
+      // applied once at the step where the march crosses that lens's reference plane
+      for (const lc of lensCache) {
+        if (appliedAperture.has(lc.id)) continue;
+        if (lc.z >= zStart && lc.z < zEnd) {
+          const halfD = lc.height / 2;
+          for (let i = 0; i < N; i++) {
+            if (Math.abs(xGrid[i] - lc.x) > halfD) { re[i] = 0; im[i] = 0; }
+          }
+          appliedAperture.add(lc.id);
+        }
+      }
+
+      propagateFreeSpace(re, im, dz / 2, k0n0, kx);
+
+      z = zEnd;
+      if (s % chunk === 0 || s === totalSteps - 1) {
+        onProgress((s + 1) / totalSteps, z, totalSteps, s + 1);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    function amplitudeAndPhase(reArr, imArr) {
+      const amp = new Float64Array(N), rawPhase = new Float64Array(N);
+      for (let i = 0; i < N; i++) { amp[i] = Math.hypot(reArr[i], imArr[i]); rawPhase[i] = Math.atan2(imArr[i], reArr[i]); }
+      return { amplitude: amp, phaseUnwrapped: unwrapPhase(rawPhase, amp) };
+    }
+    const srcAP = amplitudeAndPhase(sourceRe, sourceIm);
+    const sinkAP = amplitudeAndPhase(re, im);
+
+    return {
+      xGridMm: Array.from(xGrid), dxMm: dx, wavelengthMm, mediaIndex, fftSize: N, boxHeightMm, stepMm,
+      source: { re: Array.from(sourceRe), im: Array.from(sourceIm), amplitude: Array.from(srcAP.amplitude), phaseUnwrapped: Array.from(srcAP.phaseUnwrapped) },
+      sink: { re: Array.from(re), im: Array.from(im), amplitude: Array.from(sinkAP.amplitude), phaseUnwrapped: Array.from(sinkAP.phaseUnwrapped) },
+      meta: {
+        sourceId: source.id, sourceName: source.name, sinkId: sink.id, sinkName: sink.name,
+        lensesTraversed: lensCache.map(lc => ({ id: lc.id, name: lc.name, physical: lc.physical, thin: lc.thin }))
+      }
+    };
+  }
+}
+
+// minimal canvas line-chart helper, styled to match the app's engineering-gray theme
+function drawLineChart(canvas, xVals, yVals, opts) {
+  opts = opts || {};
+  const ctx = canvas.getContext("2d");
+  const cssWidth = canvas.clientWidth || 400;
+  const cssHeight = canvas.clientHeight || 160;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = cssWidth * dpr; canvas.height = cssHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = cssWidth, H = cssHeight;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = "#fbfbfc"; ctx.fillRect(0, 0, W, H);
+
+  const padL = 40, padR = 8, padT = 8, padB = 20;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const n = xVals.length;
+  if (!n) return;
+  let xMin = xVals[0], xMax = xVals[n - 1];
+  let yMin = Infinity, yMax = -Infinity;
+  for (let i = 0; i < n; i++) { if (yVals[i] < yMin) yMin = yVals[i]; if (yVals[i] > yMax) yMax = yVals[i]; }
+  if (yMin === yMax) { yMin -= 1; yMax += 1; }
+  const yPad = (yMax - yMin) * 0.08;
+  yMin -= yPad; yMax += yPad;
+
+  const sx = v => padL + ((v - xMin) / (xMax - xMin || 1)) * plotW;
+  const sy = v => padT + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+
+  // gridlines
+  ctx.strokeStyle = "#e2e4e7"; ctx.lineWidth = 1;
+  for (let g = 0; g <= 4; g++) {
+    const yy = padT + (g / 4) * plotH;
+    ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke();
+  }
+  // axes
+  ctx.strokeStyle = "#8a8f96"; ctx.lineWidth = 1;
+  ctx.strokeRect(padL, padT, plotW, plotH);
+
+  // labels
+  ctx.fillStyle = "#5a6069"; ctx.font = "9px monospace"; ctx.textAlign = "right";
+  ctx.fillText(yMax.toPrecision(3), padL - 4, padT + 8);
+  ctx.fillText(yMin.toPrecision(3), padL - 4, padT + plotH);
+  ctx.textAlign = "center";
+  ctx.fillText(xMin.toPrecision(3), padL, H - 6);
+  ctx.fillText(xMax.toPrecision(3), W - padR, H - 6);
+
+  // curve
+  ctx.strokeStyle = opts.color || "#3767a6"; ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const px = sx(xVals[i]), py = sy(yVals[i]);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+}
+
+class FourierDialog {
+  constructor(app) {
+    this.app = app;
+    this.overlay = document.getElementById("fourierOverlay");
+    this.panel = document.getElementById("fourierPanel");
+    this.running = false;
+    this.lastResults = null;
+
+    document.getElementById("btnFourier").addEventListener("click", () => this.open());
+    document.getElementById("fourierClose").addEventListener("click", () => this.close());
+    document.getElementById("fourierCancel").addEventListener("click", () => this.close());
+    document.getElementById("fourierCalculate").addEventListener("click", () => this.calculate());
+    document.getElementById("fourierAutoHeight").addEventListener("click", () => this._autoHeight());
+    document.getElementById("fourierDownload").addEventListener("click", () => this._downloadResults());
+    this._bindDrag();
+    this._buildRollers();
+  }
+  _bindDrag() {
+    const handle = document.getElementById("fourierDragHandle");
+    handle.addEventListener("mousedown", e => {
+      if (e.target.closest(".modal-close")) return;
+      const rect = this.panel.getBoundingClientRect();
+      const startX = e.clientX, startY = e.clientY, startLeft = rect.left, startTop = rect.top;
+      const onMove = me => {
+        this.panel.style.left = Math.max(0, startLeft + (me.clientX - startX)) + "px";
+        this.panel.style.top = Math.max(0, startTop + (me.clientY - startY)) + "px";
+      };
+      const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+      window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+      e.preventDefault();
+    });
+  }
+  _buildRollers() {
+    this.wavelengthRoller = new RollerInput(1550, 10, () => {});
+    document.getElementById("fourierWavelengthWrap").appendChild(this.wavelengthRoller.el);
+    this.boxHeightRoller = new RollerInput(40, 1, () => {});
+    document.getElementById("fourierBoxHeightWrap").appendChild(this.boxHeightRoller.el);
+    this.stepRoller = new RollerInput(10, 1, () => {});
+    document.getElementById("fourierStepWrap").appendChild(this.stepRoller.el);
+    this.mediaIndexRoller = new RollerInput(1, 0.01, () => {});
+    document.getElementById("fourierMediaIndexWrap").appendChild(this.mediaIndexRoller.el);
+  }
+  open() {
+    const srcSel = document.getElementById("fourierSourceSelect");
+    const sinkSel = document.getElementById("fourierSinkSelect");
+    const sources = this.app.components.filter(c => c.type === "source");
+    const sinks = this.app.components.filter(c => c.type === "sink");
+    srcSel.innerHTML = sources.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (z=${s.z})</option>`).join("");
+    sinkSel.innerHTML = sinks.map(s => `<option value="${s.id}">${escapeHtml(s.name)} (z=${s.z})</option>`).join("");
+    if (!sources.length || !sinks.length) {
+      this._showError("This design needs at least one Source and one Sink before running a Fourier calculation.");
+    } else {
+      this._showError(null);
+    }
+    document.getElementById("fourierProgressWrap").classList.remove("show");
+    document.getElementById("fourierPlots").classList.remove("show");
+    document.getElementById("fourierDownload").style.display = "none";
+    this.overlay.classList.add("show");
+    if (!this.panel.style.left) {
+      this.panel.style.left = Math.max(20, (window.innerWidth - 460) / 2) + "px";
+      this.panel.style.top = Math.max(20, (window.innerHeight - 500) / 2) + "px";
+    }
+  }
+  close() { if (!this.running) this.overlay.classList.remove("show"); }
+  _showError(msg) {
+    const el = document.getElementById("fourierError");
+    if (msg) { el.textContent = msg; el.classList.add("show"); } else { el.classList.remove("show"); }
+  }
+  _autoHeight() {
+    const sources = this.app.components.filter(c => c.type === "source");
+    const sinks = this.app.components.filter(c => c.type === "sink");
+    const pool = (sources.length && sinks.length) ? this.app.components : this.app.components;
+    const maxH = pool.length ? Math.max(...pool.map(c => c.height)) : 20;
+    this.boxHeightRoller.setValue(Math.max(1, maxH * 2));
+  }
+  async calculate() {
+    if (this.running) return;
+    const srcId = document.getElementById("fourierSourceSelect").value;
+    const sinkId = document.getElementById("fourierSinkSelect").value;
+    const source = this.app.components.find(c => c.id === srcId && c.type === "source");
+    const sink = this.app.components.find(c => c.id === sinkId && c.type === "sink");
+    if (!source || !sink) { this._showError("Choose a source and a sink first."); return; }
+    if (sink.z <= source.z) { this._showError("Sink must be downstream of the source (sink z > source z)."); return; }
+
+    const lenses = this.app.components.filter(c => c.type === "lens" && c.z > source.z && c.z < sink.z).sort((a, b) => a.z - b.z);
+    const fftSize = parseInt(document.getElementById("fourierFftSize").value, 10);
+    const wavelengthMm = this.wavelengthRoller.value * 1e-6; // nm -> mm
+    const boxHeightMm = this.boxHeightRoller.value;
+    const stepMm = this.stepRoller.value * 1e-3; // um -> mm
+    const mediaIndex = this.mediaIndexRoller.value;
+    const sourceFunction = document.getElementById("fourierSourceFunc").value;
+
+    if (!isPow2(fftSize)) { this._showError("FFT size must be a power of two."); return; }
+    if (!(boxHeightMm > 0) || !(stepMm > 0) || !(wavelengthMm > 0) || !(mediaIndex > 0)) {
+      this._showError("All numeric parameters must be positive."); return;
+    }
+    this._showError(null);
+
+    this.running = true;
+    document.getElementById("fourierCalculate").textContent = "Calculating...";
+    document.getElementById("fourierCalculate").disabled = true;
+    document.getElementById("fourierProgressWrap").classList.add("show");
+    document.getElementById("fourierPlots").classList.remove("show");
+    document.getElementById("fourierProgressFill").style.width = "0%";
+    document.getElementById("fourierStatusText").textContent = "Starting...";
+
+    try {
+      const results = await FourierEngine.run(
+        { source, sink, lenses, wavelengthMm, mediaIndex, fftSize, boxHeightMm, stepMm, sourceFunction },
+        (frac, zNow, totalSteps, stepNow) => {
+          document.getElementById("fourierProgressFill").style.width = (frac * 100).toFixed(1) + "%";
+          document.getElementById("fourierStatusText").textContent =
+            `Step ${stepNow}/${totalSteps} \u2014 z = ${zNow.toFixed(3)} mm`;
+        }
+      );
+      this.lastResults = results;
+      this._renderPlots(results);
+      document.getElementById("fourierDownload").style.display = "";
+      document.getElementById("fourierStatusText").textContent = "Done.";
+    } catch (err) {
+      this._showError("Calculation failed: " + err.message);
+    } finally {
+      this.running = false;
+      document.getElementById("fourierCalculate").textContent = "Calculate";
+      document.getElementById("fourierCalculate").disabled = false;
+    }
+  }
+  _renderPlots(results) {
+    document.getElementById("fourierPlots").classList.add("show");
+    drawLineChart(document.getElementById("plotSrcAmp"), results.xGridMm, results.source.amplitude, { color: "#3767a6" });
+    drawLineChart(document.getElementById("plotSrcPhase"), results.xGridMm, results.source.phaseUnwrapped, { color: "#a63737" });
+    drawLineChart(document.getElementById("plotSinkAmp"), results.xGridMm, results.sink.amplitude, { color: "#3767a6" });
+    drawLineChart(document.getElementById("plotSinkPhase"), results.xGridMm, results.sink.phaseUnwrapped, { color: "#a63737" });
+  }
+  _downloadResults() {
+    if (!this.lastResults) return;
+    downloadTextFile("results.json", JSON.stringify(this.lastResults, null, 1));
+  }
+}
+
+/* =========================================================================
    APPLICATION
    ========================================================================= */
 class Application {
@@ -1319,6 +1907,7 @@ class Application {
     this.view = new CanvasView(this.canvas);
     this.toolbar = new Toolbar(this);
     this.dialog = new PropertyDialog(this);
+    this.fourierDialog = new FourierDialog(this);
     this.engine = new SimulationEngine(this);
 
     this.components = [];
