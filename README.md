@@ -4,7 +4,7 @@ A single-file, browser-based tool for designing planar (2D side-view) optical
 systems with paraxial ray tracing, and for running a higher-fidelity Fourier
 optics (beam propagation) calculation on top of a finished design.
 
-No build system, no server, no dependencies. Open `optics-designer.html` in a
+No build system, no server, no dependencies. Open `Linear_Lens_Liner.html` in a
 modern browser (Chrome, Firefox, or Edge) and it runs.
 
 ## Features
@@ -32,7 +32,7 @@ modern browser (Chrome, Firefox, or Edge) and it runs.
 
 ## Getting Started
 
-1. Download `optics-designer.html`.
+1. Download `Linear_Lens_Liner.html`.
 2. Open it in your browser. That's it — everything runs client-side.
 
 ## Help
