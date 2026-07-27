@@ -214,8 +214,8 @@
     <button data-mode="lens">Add Lens</button>
     <button data-mode="sink">Add Sink</button>
     <div class="sep"></div>
-    <button id="btnRun">Run Simulation</button>
-    <button id="btnFourier">Fourier Optics</button>
+    <button id="btnRun">Compute Rays</button>
+    <button id="btnFourier">Compute Fourier</button>
     <div class="sep"></div>
     <button id="btnSave">Save</button>
     <button id="btnLoad">Load</button>
@@ -231,6 +231,9 @@
       <option value="25">25 mm</option>
       <option value="50">50 mm</option>
     </select>
+    <div class="sep"></div>
+    <label>Media Index</label>
+    <div id="mediaIndexWrap" style="width:90px;"></div>
     <div class="sep"></div>
     <label>Ray Colors</label>
     <select id="colorProfileSelect">
@@ -329,7 +332,7 @@
         <button class="btn" id="fourierAutoHeight" title="Set to 2x the tallest component in the path">Auto (2&times;)</button>
       </div>
       <div class="field"><label>Propagation step size (&micro;m)</label><div id="fourierStepWrap"></div></div>
-      <div class="field"><label>Media index</label><div id="fourierMediaIndexWrap"></div></div>
+      <div class="field"><label>Media index <span style="font-weight:normal;color:var(--ink-soft);">(global &mdash; set in the toolbar)</span></label><div id="fourierMediaIndexDisplay" style="font-family:var(--mono); font-size:12px; padding:5px 7px; border:1px solid var(--panel-border); border-radius:3px; background:#f2f3f5;">1.000</div></div>
 
       <div id="fourierError"></div>
       <div id="fourierProgressWrap">
@@ -466,9 +469,24 @@ class Lens extends Component {
     if (LENS_TYPES.indexOf(this.lensType) === -1) this.lensType = "Thin";
     if (!isFinite(this.refractiveIndex) || this.refractiveIndex <= 1) this.refractiveIndex = 1.5;
   }
-  matrix() {
-    // [1 0; -1/f 1]
-    return { a: 1, b: 0, c: -1 / this.focalLength, d: 1 };
+  // The stored focalLength is the "design" focal length, i.e. what the lensmaker's
+  // equation (n_lens - 1)*(1/R1 - 1/R2) gives for this glass shape surrounded by vacuum/air
+  // (n_media=1). Immersing the same physical shape in a different medium changes its actual
+  // optical power to (n_lens/n_media - 1)*(1/R1 - 1/R2); dividing the two relations lets the
+  // unknown shape factor (1/R1 - 1/R2) cancel out entirely, so this works for every lens type
+  // (including idealized Thin lenses, which have no explicit radii at all):
+  //   f_effective = f_design * (n_lens - 1) / (n_lens/n_media - 1)
+  effectiveFocalLength(mediaIndex) {
+    const nMedia = (isFinite(mediaIndex) && mediaIndex > 0) ? mediaIndex : 1;
+    const nLens = this.refractiveIndex;
+    const denom = (nLens / nMedia) - 1;
+    if (Math.abs(denom) < 1e-9) return Infinity; // index-matched to its surroundings: no optical power
+    return this.focalLength * (nLens - 1) / denom;
+  }
+  matrix(mediaIndex) {
+    // [1 0; -1/f 1], using the focal length as modified by the surrounding media index
+    const fEff = this.effectiveFocalLength(mediaIndex === undefined ? 1 : mediaIndex);
+    return { a: 1, b: 0, c: -1 / fEff, d: 1 }; // 1/Infinity safely evaluates to 0 (no bending)
   }
   toJSON() {
     return Object.assign(super.toJSON(), { focalLength: this.focalLength, lensType: this.lensType, refractiveIndex: this.refractiveIndex });
@@ -598,7 +616,7 @@ class SimulationEngine {
           curX = propX; curTheta = propTheta; curZ = comp.z;
 
           if (comp.type === "lens") {
-            const m = comp.matrix();
+            const m = comp.matrix(this.app && this.app.mediaIndex);
             const relX = curX - comp.x;   // ray height relative to this lens's own axis
             const newRelX = m.a * relX + m.b * curTheta;
             const newTheta = m.c * relX + m.d * curTheta;
@@ -1066,6 +1084,13 @@ class Toolbar {
     document.getElementById("btnLoad").addEventListener("click", () => document.getElementById("fileInput").click());
     document.getElementById("btnFit").addEventListener("click", () => { app.view.fit(app.components); app.render(); });
     document.getElementById("snapSelect").addEventListener("change", e => { app.snap = parseFloat(e.target.value); });
+    this.mediaIndexRoller = new RollerInput(app.mediaIndex, 0.01, val => {
+      app.mediaIndex = val;
+      app.runSimulation();
+      const disp = document.getElementById("fourierMediaIndexDisplay");
+      if (disp) disp.textContent = val.toFixed(3);
+    });
+    document.getElementById("mediaIndexWrap").appendChild(this.mediaIndexRoller.el);
     document.getElementById("colorProfileSelect").addEventListener("change", e => { app.colorProfile = e.target.value; app.render(); });
     document.getElementById("fileInput").addEventListener("change", e => {
       const file = e.target.files[0];
@@ -1797,8 +1822,6 @@ class FourierDialog {
     document.getElementById("fourierBoxHeightWrap").appendChild(this.boxHeightRoller.el);
     this.stepRoller = new RollerInput(10, 1, () => {});
     document.getElementById("fourierStepWrap").appendChild(this.stepRoller.el);
-    this.mediaIndexRoller = new RollerInput(1, 0.01, () => {});
-    document.getElementById("fourierMediaIndexWrap").appendChild(this.mediaIndexRoller.el);
   }
   open() {
     const srcSel = document.getElementById("fourierSourceSelect");
@@ -1815,6 +1838,7 @@ class FourierDialog {
     document.getElementById("fourierProgressWrap").classList.remove("show");
     document.getElementById("fourierPlots").classList.remove("show");
     document.getElementById("fourierDownload").style.display = "none";
+    document.getElementById("fourierMediaIndexDisplay").textContent = this.app.mediaIndex.toFixed(3);
     this.overlay.classList.add("show");
     if (!this.panel.style.left) {
       this.panel.style.left = Math.max(20, (window.innerWidth - 460) / 2) + "px";
@@ -1847,7 +1871,7 @@ class FourierDialog {
     const wavelengthMm = this.wavelengthRoller.value * 1e-6; // nm -> mm
     const boxHeightMm = this.boxHeightRoller.value;
     const stepMm = this.stepRoller.value * 1e-3; // um -> mm
-    const mediaIndex = this.mediaIndexRoller.value;
+    const mediaIndex = this.app.mediaIndex;
     const sourceFunction = document.getElementById("fourierSourceFunc").value;
 
     if (!isPow2(fftSize)) { this._showError("FFT size must be a power of two."); return; }
@@ -1903,6 +1927,7 @@ class FourierDialog {
    ========================================================================= */
 class Application {
   constructor() {
+    this.mediaIndex = 1; // global background/ambient refractive index, used by ray-trace lens matrices and the Fourier calc
     this.canvas = document.getElementById("canvas");
     this.view = new CanvasView(this.canvas);
     this.toolbar = new Toolbar(this);
