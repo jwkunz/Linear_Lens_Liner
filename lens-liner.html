@@ -351,6 +351,7 @@
     <div class="modal-foot">
       <button class="btn" id="fourierDownload" style="display:none;">Download results.json</button>
       <div style="flex:1"></div>
+      <button class="btn danger" id="fourierStop" style="display:none;">Cancel</button>
       <button class="btn" id="fourierCancel">Close</button>
       <button class="btn primary" id="fourierCalculate">Calculate</button>
     </div>
@@ -1452,6 +1453,11 @@ class PropertyDialog {
 
 function isPow2(n) { return n > 0 && (n & (n - 1)) === 0; }
 
+// thrown by FourierEngine.run() to unwind cleanly when the user hits Cancel mid-computation
+class FourierCancelledError extends Error {
+  constructor() { super("Calculation cancelled."); this.name = "FourierCancelledError"; }
+}
+
 // In-place iterative radix-2 Cooley-Tukey FFT. re/im are Float64Array of length N (power of 2).
 function fftRadix2(re, im, invert) {
   const N = re.length;
@@ -1610,7 +1616,7 @@ class FourierEngine {
     return n;
   }
 
-  static async run(cfg, onProgress) {
+  static async run(cfg, onProgress, cancelToken) {
     const { source, sink, lenses, wavelengthMm, mediaIndex, fftSize, boxHeightMm, stepMm, sourceFunction } = cfg;
     const N = fftSize;
     const dx = boxHeightMm / N;
@@ -1644,12 +1650,13 @@ class FourierEngine {
 
     const totalDist = sink.z - source.z;
     if (totalDist <= 0) throw new Error("Sink must be downstream of the source (sink z > source z).");
+    if (cancelToken && cancelToken.cancelled) throw new FourierCancelledError();
     const totalSteps = Math.max(1, Math.ceil(totalDist / stepMm));
     const appliedThinLens = new Set();
     const appliedAperture = new Set();
 
     let z = source.z;
-    const chunk = Math.max(1, Math.floor(totalSteps / 150)); // yield to the UI ~150 times regardless of scale
+    let lastYield = Date.now();
 
     for (let s = 0; s < totalSteps; s++) {
       const dz = Math.min(stepMm, sink.z - z);
@@ -1702,9 +1709,12 @@ class FourierEngine {
       propagateFreeSpace(re, im, dz / 2, k0n0, kx);
 
       z = zEnd;
-      if (s % chunk === 0 || s === totalSteps - 1) {
+      const now = Date.now();
+      if (now - lastYield > 40 || s === totalSteps - 1) {
         onProgress((s + 1) / totalSteps, z, totalSteps, s + 1);
         await new Promise(r => setTimeout(r, 0));
+        lastYield = Date.now();
+        if (cancelToken && cancelToken.cancelled) throw new FourierCancelledError();
       }
     }
 
@@ -1790,10 +1800,12 @@ class FourierDialog {
     this.panel = document.getElementById("fourierPanel");
     this.running = false;
     this.lastResults = null;
+    this.cancelToken = null;
 
     document.getElementById("btnFourier").addEventListener("click", () => this.open());
     document.getElementById("fourierClose").addEventListener("click", () => this.close());
     document.getElementById("fourierCancel").addEventListener("click", () => this.close());
+    document.getElementById("fourierStop").addEventListener("click", () => this._requestCancel());
     document.getElementById("fourierCalculate").addEventListener("click", () => this.calculate());
     document.getElementById("fourierAutoHeight").addEventListener("click", () => this._autoHeight());
     document.getElementById("fourierDownload").addEventListener("click", () => this._downloadResults());
@@ -1881,8 +1893,12 @@ class FourierDialog {
     this._showError(null);
 
     this.running = true;
-    document.getElementById("fourierCalculate").textContent = "Calculating...";
-    document.getElementById("fourierCalculate").disabled = true;
+    this.cancelToken = { cancelled: false };
+    document.getElementById("fourierCalculate").style.display = "none";
+    document.getElementById("fourierCancel").disabled = true;
+    document.getElementById("fourierStop").style.display = "";
+    document.getElementById("fourierStop").disabled = false;
+    document.getElementById("fourierStop").textContent = "Cancel";
     document.getElementById("fourierProgressWrap").classList.add("show");
     document.getElementById("fourierPlots").classList.remove("show");
     document.getElementById("fourierProgressFill").style.width = "0%";
@@ -1895,19 +1911,36 @@ class FourierDialog {
           document.getElementById("fourierProgressFill").style.width = (frac * 100).toFixed(1) + "%";
           document.getElementById("fourierStatusText").textContent =
             `Step ${stepNow}/${totalSteps} \u2014 z = ${zNow.toFixed(3)} mm`;
-        }
+        },
+        this.cancelToken
       );
       this.lastResults = results;
       this._renderPlots(results);
       document.getElementById("fourierDownload").style.display = "";
       document.getElementById("fourierStatusText").textContent = "Done.";
     } catch (err) {
-      this._showError("Calculation failed: " + err.message);
+      if (err instanceof FourierCancelledError) {
+        document.getElementById("fourierStatusText").textContent = "Cancelled.";
+        document.getElementById("fourierProgressWrap").classList.remove("show");
+      } else {
+        this._showError("Calculation failed: " + err.message);
+        document.getElementById("fourierProgressWrap").classList.remove("show");
+      }
     } finally {
       this.running = false;
-      document.getElementById("fourierCalculate").textContent = "Calculate";
+      this.cancelToken = null;
+      document.getElementById("fourierCalculate").style.display = "";
       document.getElementById("fourierCalculate").disabled = false;
+      document.getElementById("fourierCancel").disabled = false;
+      document.getElementById("fourierStop").style.display = "none";
     }
+  }
+  _requestCancel() {
+    if (!this.running || !this.cancelToken) return;
+    this.cancelToken.cancelled = true;
+    document.getElementById("fourierStop").disabled = true;
+    document.getElementById("fourierStop").textContent = "Cancelling...";
+    document.getElementById("fourierStatusText").textContent = "Cancelling...";
   }
   _renderPlots(results) {
     document.getElementById("fourierPlots").classList.add("show");
