@@ -1793,6 +1793,16 @@ function drawLineChart(canvas, xVals, yVals, opts) {
   ctx.stroke();
 }
 
+// human-readable duration for the Fourier progress bar's ETA
+function formatDuration(ms) {
+  if (!isFinite(ms) || ms < 0) return "--";
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 1) return "<1s";
+  if (totalSec < 60) return totalSec + "s";
+  const m = Math.floor(totalSec / 60), s = totalSec % 60;
+  return m + "m " + s + "s";
+}
+
 class FourierDialog {
   constructor(app) {
     this.app = app;
@@ -1904,13 +1914,22 @@ class FourierDialog {
     document.getElementById("fourierProgressFill").style.width = "0%";
     document.getElementById("fourierStatusText").textContent = "Starting...";
 
+    const startTime = Date.now();
     try {
       const results = await FourierEngine.run(
         { source, sink, lenses, wavelengthMm, mediaIndex, fftSize, boxHeightMm, stepMm, sourceFunction },
         (frac, zNow, totalSteps, stepNow) => {
           document.getElementById("fourierProgressFill").style.width = (frac * 100).toFixed(1) + "%";
+          const elapsed = Date.now() - startTime;
+          // wait for a small amount of progress/time before trusting the linear extrapolation,
+          // so the first callback or two don't flash a wild, meaningless estimate
+          let etaText = "";
+          if (frac > 0 && frac < 1 && elapsed > 400 && frac > 0.01) {
+            const remainingMs = elapsed * (1 - frac) / frac;
+            etaText = ` \u2014 est. ${formatDuration(remainingMs)} remaining`;
+          }
           document.getElementById("fourierStatusText").textContent =
-            `Step ${stepNow}/${totalSteps} \u2014 z = ${zNow.toFixed(3)} mm`;
+            `Step ${stepNow}/${totalSteps} \u2014 z = ${zNow.toFixed(3)} mm${etaText}`;
         },
         this.cancelToken
       );
