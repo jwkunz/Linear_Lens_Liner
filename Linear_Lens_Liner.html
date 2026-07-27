@@ -193,6 +193,34 @@
   .fourier-plot-cell canvas{ width:100%; display:block; }
   .fourier-plot-title{ font-size:10px; color:var(--ink-soft); text-align:center; margin-bottom:2px; }
 
+  /* Help floating panel (same floating/draggable/resizable pattern as #modal) */
+  #helpOverlay{
+    position:fixed; inset:0; pointer-events:none; display:none; z-index:51;
+  }
+  #helpOverlay.show{ display:block; }
+  #helpPanel{
+    position:absolute; pointer-events:auto;
+    background:#fff; border:1px solid var(--panel-border); border-radius:6px;
+    width:480px; height:520px; min-width:340px; min-height:260px;
+    max-width:92vw; max-height:88vh;
+    left:calc(50vw - 240px); top:calc(50vh - 260px);
+    box-shadow:0 10px 34px rgba(0,0,0,.28);
+    resize:both; overflow:auto;
+    display:flex; flex-direction:column;
+  }
+  #helpBody{ font-size:12.5px; line-height:1.5; color:var(--ink); }
+  #helpBody h4{
+    font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--accent);
+    margin:16px 0 6px; padding-top:10px; border-top:1px dashed var(--panel-border);
+  }
+  #helpBody h4:first-child{ margin-top:0; padding-top:0; border-top:none; }
+  #helpBody p{ margin:0 0 8px; }
+  #helpBody ul{ margin:0 0 8px; padding-left:18px; }
+  #helpBody li{ margin-bottom:6px; }
+  #helpBody code{
+    font-family:var(--mono); font-size:11px; background:#eef0f2; border-radius:3px; padding:1px 4px;
+  }
+
   /* roller dial number picker */
   .roller-field{
     display:flex; align-items:stretch; border:1px solid var(--panel-border); border-radius:3px;
@@ -238,7 +266,10 @@
       </svg>
       <span class="brand-title">Linear Lens Liner</span>
     </div>
-    <div class="legal">Distributed under the MIT license by numerius.engineering@gmail.com</div>
+    <div style="display:flex; align-items:center; gap:14px;">
+      <button class="btn" id="btnHelp">Help</button>
+      <div class="legal">Distributed under the MIT license by numerius.engineering@gmail.com</div>
+    </div>
   </div>
   <div id="toolbar">
     <button data-mode="select">Select</button>
@@ -319,6 +350,46 @@
 </div>
 
 <input type="file" id="fileInput" accept="application/json">
+
+<div id="helpOverlay">
+  <div id="helpPanel">
+    <div class="modal-head" id="helpDragHandle">
+      <span>Help &mdash; Linear Lens Liner</span>
+      <button class="modal-close" id="helpClose" title="Close">&#x2715;</button>
+    </div>
+    <div class="modal-body" id="helpBody">
+
+      <h4>The basics</h4>
+      <ul>
+        <li><b>Add a component</b>: click <i>Add Source</i>, <i>Add Lens</i>, or <i>Add Sink</i>, then click the canvas to place it.</li>
+        <li><b>Select / move</b>: in <i>Select</i> mode, click to select, drag to move (snapped to the current grid size).</li>
+        <li><b>Edit properties</b>: double-click a component. Numeric fields are "roller" controls &mdash; drag left/right, scroll over them, use the +/- buttons, or click once to type a value directly. A shared step size at the bottom of the panel sets the roller increment; "Recompute on change" controls whether edits re-run the ray-trace live or only on Save.</li>
+        <li><b>Keyboard</b>: <code>Delete</code> removes the selection, arrow keys nudge it by one snap step, <code>Ctrl+D</code> duplicates it, <code>Ctrl+S</code> downloads the design as JSON, <code>Ctrl+O</code> loads one.</li>
+        <li><b>Canvas</b>: scroll to zoom, middle-mouse-drag to pan, <i>Fit View</i> to frame the whole design.</li>
+      </ul>
+
+      <h4>Ray tracing &mdash; "Compute Rays"</h4>
+      <p>Traces every source's rays (evenly spaced across its beam width, up to 99 per source) through all lenses to every downstream sink. Results &mdash; spot diameter, centroid, magnification, angular magnification, a per-ray table, and a clipping report &mdash; appear in the side panel. Rays that miss a component's clear aperture are clipped. <i>Ray Colors</i> in the toolbar switches between grayscale shading and a ROYGBV spectrum across the ray bundle.</p>
+
+      <h4>Lens geometry tools</h4>
+      <p>Every lens's property panel includes an <b>Index of refraction</b> field (with a calculator for <code>n = &radic;&epsilon;r</code> from relative permittivity), a <b>Geometry Report</b> button (downloads a tabulated <code>.txt</code> of derived surface radii/sag/edge thickness), and a <b>Generate in FreeCAD</b> button (downloads a <code>.FCMacro</code> Python macro that builds the lens as a real solid body). Idealized "Thin" lenses have no physical surfaces to report or model; meniscus shapes assume a documented radius ratio, since focal length and index alone can't uniquely fix two radii.</p>
+
+      <h4>Fourier optics &mdash; "Compute Fourier"</h4>
+      <p>Opens a wave-optics configuration panel: choose a Source/Sink pair, a source amplitude function (Gaussian/boxcar/triangular &mdash; pointing and divergence become an exact tilt and wavefront curvature), wavelength, FFT size, box clipping height (the <i>Auto</i> button sets it to 2&times; the tallest component), and propagation step size in &micro;m (keep this well below a lens's surface sag to resolve its curvature accurately). Physical lenses are meshed directly into the propagation grid using their real refractive index; idealized Thin lenses fall back to a phase-screen approximation. A progress bar shows an estimated time remaining, and <b>Cancel</b> stops a run in progress. When finished, download <code>results.json</code> (complex field at both planes) and view four plots: source/sink &times; amplitude/unwrapped phase.</p>
+
+      <h4>Global media index</h4>
+      <p>The <b>Media Index</b> control in the toolbar is used everywhere: it adjusts each lens's effective focal length in the ray-trace (a lens in water is weaker than the same lens in air) and sets the background index for the Fourier calculation, so both stay consistent.</p>
+
+      <h4>Saving and loading</h4>
+      <p><b>Save</b> downloads the current design (components, snap size, zoom) as JSON. <b>Load</b> reads one back in.</p>
+
+    </div>
+    <div class="modal-foot">
+      <div style="flex:1"></div>
+      <button class="btn primary" id="helpCloseBtn">Close</button>
+    </div>
+  </div>
+</div>
 
 <div id="fourierOverlay">
   <div id="fourierPanel">
@@ -2009,6 +2080,34 @@ class FourierDialog {
 /* =========================================================================
    APPLICATION
    ========================================================================= */
+class HelpDialog {
+  constructor(app) {
+    this.overlay = document.getElementById("helpOverlay");
+    this.panel = document.getElementById("helpPanel");
+    document.getElementById("btnHelp").addEventListener("click", () => this.open());
+    document.getElementById("helpClose").addEventListener("click", () => this.close());
+    document.getElementById("helpCloseBtn").addEventListener("click", () => this.close());
+    this._bindDrag();
+  }
+  _bindDrag() {
+    const handle = document.getElementById("helpDragHandle");
+    handle.addEventListener("mousedown", e => {
+      if (e.target.closest(".modal-close")) return;
+      const rect = this.panel.getBoundingClientRect();
+      const startX = e.clientX, startY = e.clientY, startLeft = rect.left, startTop = rect.top;
+      const onMove = me => {
+        this.panel.style.left = Math.max(0, startLeft + (me.clientX - startX)) + "px";
+        this.panel.style.top = Math.max(0, startTop + (me.clientY - startY)) + "px";
+      };
+      const onUp = () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+      window.addEventListener("mousemove", onMove); window.addEventListener("mouseup", onUp);
+      e.preventDefault();
+    });
+  }
+  open() { this.overlay.classList.add("show"); }
+  close() { this.overlay.classList.remove("show"); }
+}
+
 class Application {
   constructor() {
     this.mediaIndex = 1; // global background/ambient refractive index, used by ray-trace lens matrices and the Fourier calc
@@ -2017,6 +2116,7 @@ class Application {
     this.toolbar = new Toolbar(this);
     this.dialog = new PropertyDialog(this);
     this.fourierDialog = new FourierDialog(this);
+    this.helpDialog = new HelpDialog(this);
     this.engine = new SimulationEngine(this);
 
     this.components = [];
