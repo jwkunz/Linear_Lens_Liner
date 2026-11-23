@@ -69,6 +69,10 @@ a ROYGBV spectrum across the ray bundle.
 
 Every lens's property panel includes:
 
+- **Focal length / Radius of curvature**: linked entry where focal length `f`
+  and surface radius of curvature `R` stay synchronized with the lens type and
+  refractive index `n` (with an `R → f` calculator row matching the permittivity
+  converter).
 - **Index of refraction** field, with a small calculator that computes
   `n = √εr` from a relative permittivity you enter.
 - **Geometry Report**: downloads a `.txt` file with the lens's derived
