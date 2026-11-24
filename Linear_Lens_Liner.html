@@ -270,7 +270,7 @@
         <circle cx="44" cy="24" r="1.6" fill="#3767a6"/>
       </svg>
       <span class="brand-title">Linear Lens Liner</span>
-      <span class="brand-version">v1.1</span>
+      <span class="brand-version">v1.1.1</span>
     </div>
     <div style="display:flex; align-items:center; gap:14px;">
       <button class="btn" id="btnHelp">Help</button>
@@ -949,7 +949,7 @@ function buildFreeCADMacro(lens) {
 class Serializer {
   static toJSON(app) {
     return {
-      version: "1.1",
+      version: "1.1.1",
       gridSnap: app.snap,
       zoom: app.view.zoom,
       components: app.components.map(c => c.toJSON())
@@ -1118,43 +1118,56 @@ class CanvasView {
   }
   _drawLens(ctx, comp, halfH) {
     ctx.strokeStyle = getCSS("--ink"); ctx.lineWidth = 1.5;
-    const t = Math.max(comp.thickness * this.scale, 4);
     const type = comp.lensType;
-    ctx.beginPath();
-    if (type === "Bi Convex") {
-      ctx.moveTo(-t, -halfH);
-      ctx.quadraticCurveTo(t * 2, 0, -t, halfH);
-      ctx.quadraticCurveTo(-t * 3, 0, -t, -halfH);
-    } else if (type === "Bi Concave") {
-      ctx.moveTo(-t, -halfH);
-      ctx.quadraticCurveTo(0, -halfH * 0.6, t, -halfH);
-      ctx.lineTo(t, halfH);
-      ctx.quadraticCurveTo(0, halfH * 0.6, -t, halfH);
-      ctx.closePath();
-    } else if (type === "Plano Convex") {
-      ctx.moveTo(0, -halfH);
-      ctx.lineTo(0, halfH);
-      ctx.quadraticCurveTo(t * 2, 0, 0, -halfH);
-    } else if (type === "Plano Concave") {
-      ctx.moveTo(0, -halfH);
-      ctx.lineTo(0, halfH);
-      ctx.lineTo(t, halfH);
-      ctx.quadraticCurveTo(0, 0, t, -halfH);
-      ctx.closePath();
-    } else if (type === "Positive Meniscus") {
-      ctx.moveTo(-t, -halfH);
-      ctx.quadraticCurveTo(t * 1.5, 0, -t, halfH);
-      ctx.quadraticCurveTo(0, 0, -t, -halfH);
-    } else if (type === "Negative Meniscus") {
-      ctx.moveTo(-t, -halfH);
-      ctx.quadraticCurveTo(t * 0.6, 0, -t, halfH);
-      ctx.quadraticCurveTo(t * 1.6, 0, -t, -halfH);
-    } else {
-      // Thin lens symbol: vertical line with arrowhead ticks
+    if (type === "Thin") {
+      // Thin lens symbol: vertical line with arrowhead ticks (inverted for diverging f < 0)
+      const dir = comp.focalLength < 0 ? -1 : 1;
+      ctx.beginPath();
       ctx.moveTo(0, -halfH); ctx.lineTo(0, halfH);
-      ctx.moveTo(-6, -halfH); ctx.lineTo(0, -halfH - 8); ctx.lineTo(6, -halfH);
-      ctx.moveTo(-6, halfH); ctx.lineTo(0, halfH + 8); ctx.lineTo(6, halfH);
+      ctx.moveTo(-6, -halfH); ctx.lineTo(0, -halfH - 8 * dir); ctx.lineTo(6, -halfH);
+      ctx.moveTo(-6, halfH); ctx.lineTo(0, halfH + 8 * dir); ctx.lineTo(6, halfH);
+      ctx.stroke();
+      return;
     }
+
+    const g = comp.computeGeometry();
+    const scale = this.scale;
+    const halfD = comp.height / 2;
+    const signedSagPx = R => {
+      if (!isFinite(R) || R === 0) return 0;
+      const rAbs = Math.abs(R);
+      const sagMm = rAbs >= halfD
+        ? (rAbs - Math.sqrt(rAbs * rAbs - halfD * halfD))
+        : Math.min(halfD, (halfD * halfD) / (2 * Math.max(rAbs, 1e-3)));
+      const sign = R > 0 ? 1 : -1;
+      // Enforce a subtle minimum visual sag so flat vs curved surfaces remain distinguishable,
+      // while scaling smoothly with radius of curvature and focal length.
+      const rawPx = sagMm * scale;
+      const clampedPx = Math.min(halfH * 0.85, Math.max(1.5, rawPx));
+      return sign * clampedPx;
+    };
+
+    const s1 = signedSagPx(g.R1);
+    const s2 = signedSagPx(g.R2);
+    // Keep the back surface downstream of the front surface across both vertices and edges
+    const minGapPx = Math.max(comp.thickness * scale, 4, (s1 - s2) + 2);
+    const z1v = -minGapPx / 2;
+    const z2v = minGapPx / 2;
+    const z1e = z1v + s1;
+    const z2e = z2v + s2;
+    // For a quadratic Bezier from (z_e, -halfH) to (z_e, +halfH) to pass through vertex (z_v, 0),
+    // its control point must lie at z_c = 2*z_v - z_e = z_v - s.
+    const z1c = z1v - s1;
+    const z2c = z2v - s2;
+
+    ctx.fillStyle = "rgba(201, 216, 236, 0.35)";
+    ctx.beginPath();
+    ctx.moveTo(z1e, -halfH);
+    ctx.quadraticCurveTo(z1c, 0, z1e, halfH);
+    ctx.lineTo(z2e, halfH);
+    ctx.quadraticCurveTo(z2c, 0, z2e, -halfH);
+    ctx.closePath();
+    ctx.fill();
     ctx.stroke();
   }
   _drawSink(ctx, halfH) {
