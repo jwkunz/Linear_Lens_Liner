@@ -270,7 +270,7 @@
         <circle cx="44" cy="24" r="1.6" fill="#3767a6"/>
       </svg>
       <span class="brand-title">Linear Lens Liner</span>
-      <span class="brand-version">v1.1.1</span>
+      <span class="brand-version">v1.2.0</span>
     </div>
     <div style="display:flex; align-items:center; gap:14px;">
       <button class="btn" id="btnHelp">Help</button>
@@ -309,6 +309,8 @@
       <option value="grayscale" selected>Grayscale</option>
       <option value="spectrum">Spectrum</option>
     </select>
+    <div class="sep"></div>
+    <button id="btnDrawClipped" class="active" title="Toggle rendering of clipped rays">Draw Clipped Rays</button>
   </div>
 
   <div id="canvasWrap">
@@ -736,10 +738,11 @@ class SimulationEngine {
     const optics = components.filter(c => c.type !== "source").sort((a, b) => a.z - b.z);
     for (const s of optics) if (s.type === "sink") s.lastResult = { rays: [], byBundle: [] };
 
-    const allBundles = []; // {sourceId, rays:[top,mid,bot] at each sink z reached}
+    const allBundles = []; // {sourceId, sourceName, rays} across all sources
 
     for (const source of sources) {
       const rays = source.generateRays();
+      allBundles.push({ sourceId: source.id, sourceName: source.name, rays });
       for (const ray of rays) {
         ray.path.push({ x: ray.x, z: source.z });
         let curX = ray.x, curTheta = ray.theta, curZ = source.z;
@@ -774,10 +777,17 @@ class SimulationEngine {
         }
         ray.finalX = curX; ray.finalTheta = curTheta;
       }
-      // group this source's bundle per sink
+      // group this source's bundle per downstream sink (including rays clipped before reaching that sink)
       for (const comp of optics) {
-        if (comp.type !== "sink") continue;
-        const bundleRays = rays.filter(r => comp.lastResult.rays.indexOf(r) !== -1);
+        if (comp.type !== "sink" || comp.z < source.z) continue;
+        const bundleRays = rays.filter(r => {
+          if (comp.lastResult.rays.indexOf(r) !== -1) return true;
+          if (!r.alive && r.clipLocation && r.clipLocation.z <= comp.z) {
+            comp.lastResult.rays.push(r);
+            return true;
+          }
+          return false;
+        });
         if (bundleRays.length) {
           comp.lastResult.byBundle.push({ sourceId: source.id, sourceName: source.name, rays: bundleRays, sourceBeamWidth: source.beamWidth, sourceDivergence: source.divergence });
         }
@@ -789,7 +799,7 @@ class SimulationEngine {
       if (comp.type !== "sink") continue;
       this.computeSinkMetrics(comp);
     }
-    return { sources, optics };
+    return { sources, optics, allBundles };
   }
 
   computeSinkMetrics(sink) {
@@ -949,7 +959,7 @@ function buildFreeCADMacro(lens) {
 class Serializer {
   static toJSON(app) {
     return {
-      version: "1.1.1",
+      version: "1.2.0",
       gridSnap: app.snap,
       zoom: app.view.zoom,
       components: app.components.map(c => c.toJSON())
@@ -1251,6 +1261,13 @@ class Toolbar {
     });
     document.getElementById("mediaIndexWrap").appendChild(this.mediaIndexRoller.el);
     document.getElementById("colorProfileSelect").addEventListener("change", e => { app.colorProfile = e.target.value; app.render(); });
+    const btnDrawClipped = document.getElementById("btnDrawClipped");
+    btnDrawClipped.classList.toggle("active", !!app.drawClippedRays);
+    btnDrawClipped.addEventListener("click", () => {
+      app.drawClippedRays = !app.drawClippedRays;
+      btnDrawClipped.classList.toggle("active", app.drawClippedRays);
+      app.render();
+    });
     document.getElementById("fileInput").addEventListener("change", e => {
       const file = e.target.files[0];
       if (!file) return;
@@ -2276,6 +2293,7 @@ class Application {
     this.rollerStep = 1;            // shared step size for property-dialog roller pickers
     this.recomputeOnChange = true;  // if true, dialog edits resimulate live before Save
     this.colorProfile = "grayscale"; // 'grayscale' | 'spectrum'
+    this.drawClippedRays = true;    // whether clipped rays are rendered on canvas
 
     this.dragging = null;   // {comp, startMouse, startCompPos}
     this.panning = null;
@@ -2553,11 +2571,11 @@ class Application {
   render() {
     this.view.drawGrid();
     // draw ray paths first (under components)
-    if (this.lastSimResult) {
-      for (const sink of this.components.filter(c => c.type === "sink")) {
-        if (!sink.lastResult) continue;
-        for (const bundle of sink.lastResult.byBundle) {
-          for (const ray of bundle.rays) this.view.drawRayPath(ray, this.colorProfile);
+    if (this.lastSimResult && this.lastSimResult.allBundles) {
+      for (const bundle of this.lastSimResult.allBundles) {
+        for (const ray of bundle.rays) {
+          if (!ray.alive && !this.drawClippedRays) continue;
+          this.view.drawRayPath(ray, this.colorProfile);
         }
       }
     }
